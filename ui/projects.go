@@ -66,7 +66,33 @@ func (m Model) viewProjects(contentHeight int) string {
 	sb.WriteString(DetailSectionStyle.Render("Select Project"))
 	sb.WriteString("\n\n")
 
-	for i, p := range m.Projects {
+	// Calculate how many projects fit in the viewport.
+	// Subtract header (2 lines) + footer divider (1 line) + help (1 line) = 4 non-item lines.
+	nonItemLines := 4
+	viewportHeight := contentHeight - nonItemLines
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+
+	// Slice visible projects to fit viewport, centered on ActiveProject.
+	start := m.ActiveProject - viewportHeight/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + viewportHeight
+	if end > len(m.Projects) {
+		end = len(m.Projects)
+	}
+	// Re-adjust start if we hit the bottom
+	if end-start < viewportHeight && start > 0 {
+		start = end - viewportHeight
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	for i := start; i < end; i++ {
+		p := m.Projects[i]
 		label := fmt.Sprintf("[%d] %s/%s", i+1, p.Workspace, p.RepoSlug)
 		if i == m.ActiveProject {
 			sb.WriteString(ListCursorStyle.Render("▶ " + label))

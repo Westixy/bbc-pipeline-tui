@@ -219,7 +219,7 @@ func (m Model) viewDetail(contentHeight int) string {
 	if len(m.Steps) > 0 {
 		var stepLines []string
 		for i, s := range m.Steps {
-			state := renderStatusBadge(stepStatusStyle(s.State))
+			state := renderStatusBadge(resolveStepStatus(s.State))
 			name := s.Name
 			if name == "" {
 				name = fmt.Sprintf("Step %d", i+1)

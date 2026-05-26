@@ -99,14 +99,14 @@ func (m Model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "up", "k":
-			if m.RunFocus > 0 {
-				m.RunFocus--
+			if !m.RunEditMode {
+				m.RunFocus = clampCursor(m.RunFocus-1, len(m.RunVars))
 			}
 			return m, nil
 
 		case "down", "j":
-			if m.RunFocus >= 0 && m.RunFocus < len(m.RunVars)-1 {
-				m.RunFocus++
+			if !m.RunEditMode {
+				m.RunFocus = clampCursor(m.RunFocus+1, len(m.RunVars))
 			}
 			return m, nil
 		}

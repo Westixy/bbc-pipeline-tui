@@ -16,9 +16,9 @@ type Project struct {
 
 // Config holds the application configuration.
 type Config struct {
-	Username  string    `yaml:"username"`
-	AppPass   string    `yaml:"app_password"`
-	Projects  []Project `yaml:"projects"`
+	Username string    `yaml:"username"`
+	AppPass  string    `yaml:"app_password"`
+	Projects []Project `yaml:"projects"`
 }
 
 // DefaultPath returns the default config file path.

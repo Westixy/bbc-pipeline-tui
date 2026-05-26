@@ -3,9 +3,9 @@ package ui
 import (
 	"fmt"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/bbc/infra-pipeline-ui/bitbucket"
 	"github.com/bbc/infra-pipeline-ui/config"
+	"github.com/charmbracelet/bubbles/textinput"
 )
 
 // Screen constants
@@ -35,13 +35,13 @@ type Model struct {
 	ActiveProject int
 
 	// Pipeline list
-	Pipelines       []bitbucket.Pipeline
-	NextPageURL     string
-	ListCursor      int
-	ListFilter       string
-	ListState       int // StateLoading, StateReady, StateError
-	ListError       string
-	ListScrollOff   int // scroll offset for list viewport
+	Pipelines     []bitbucket.Pipeline
+	NextPageURL   string
+	ListCursor    int
+	ListFilter    string
+	ListState     int // StateLoading, StateReady, StateError
+	ListError     string
+	ListScrollOff int // scroll offset for list viewport
 
 	// Pipeline detail
 	SelectedPipeline *bitbucket.Pipeline
@@ -53,27 +53,27 @@ type Model struct {
 	DetailError      string
 
 	// Logs
-	LogContent     string
-	LogStepName    string
-	LogSearchTerm  string
-	LogSearchMode  bool   // true when the user is typing a search term
-	LogMatchIndex  int    // current match index (-1 if no match selected)
-	LogMatchLines  []int  // line numbers of all matches
-	LogState       int
-	LogError       string
-	LogScrollOff   int // scroll offset for log viewport
+	LogContent    string
+	LogStepName   string
+	LogSearchTerm string
+	LogSearchMode bool  // true when the user is typing a search term
+	LogMatchIndex int   // current match index (-1 if no match selected)
+	LogMatchLines []int // line numbers of all matches
+	LogState      int
+	LogError      string
+	LogScrollOff  int // scroll offset for log viewport
 
 	// Run form
-	RunBranch       textinput.Model
-	RunSelector     textinput.Model // custom pipeline selector pattern
-	RunEditorInput  textinput.Model // used for inline variable editing
-	RunVars         []bitbucket.PipelineVariable
-	RunVarCursor    int // cursor position in variable list
-	RunEditMode     bool // true when editing a variable inline
-	RunFocus        int
-	RunState        int
-	RunError        string
-	RunSuccessMsg   string
+	RunBranch      textinput.Model
+	RunSelector    textinput.Model // custom pipeline selector pattern
+	RunEditorInput textinput.Model // used for inline variable editing
+	RunVars        []bitbucket.PipelineVariable
+	RunVarCursor   int  // cursor position in variable list
+	RunEditMode    bool // true when editing a variable inline
+	RunFocus       int
+	RunState       int
+	RunError       string
+	RunSuccessMsg  string
 
 	// Global
 	Width  int

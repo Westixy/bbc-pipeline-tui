@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/bbc/infra-pipeline-ui/config"
 	"github.com/bbc/infra-pipeline-ui/bitbucket"
+	"github.com/bbc/infra-pipeline-ui/config"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -138,7 +138,8 @@ func handleLoading(state int) tea.Cmd {
 	return nil
 }
 
-// handleErrorMsg handles error messages for any screen.
+// handleErrorMsg handles error messages for any screen by accepting
+// direct pointers to the state and error string fields.
 func (m *Model) handleErrorMsg(screen string, err error) {
 	switch screen {
 	case "list":

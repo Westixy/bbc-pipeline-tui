@@ -10,8 +10,30 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// filterMatchesPipeline checks if a pipeline matches the filter text.
+func filterMatchesPipeline(p bitbucket.Pipeline, lowerFilter string) bool {
+	if strings.Contains(strings.ToLower(fmt.Sprintf("%d", p.BuildNumber)), lowerFilter) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(p.Target.RefName), lowerFilter) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(pipelineTypeLabel(p.Target)), lowerFilter) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(p.State.Name), lowerFilter) {
+		return true
+	}
+	if p.State.Result != nil && strings.Contains(strings.ToLower(p.State.Result.Name), lowerFilter) {
+		return true
+	}
+	if p.Trigger.Name != "" && strings.Contains(strings.ToLower(p.Trigger.Name), lowerFilter) {
+		return true
+	}
+	return false
+}
+
 // filteredPipelines returns pipelines that match the filter text.
-// It filters by build number, branch name, type, or status.
 func filteredPipelines(pipelines []bitbucket.Pipeline, filter string) []bitbucket.Pipeline {
 	if filter == "" {
 		return pipelines
@@ -19,29 +41,8 @@ func filteredPipelines(pipelines []bitbucket.Pipeline, filter string) []bitbucke
 	lower := strings.ToLower(filter)
 	var result []bitbucket.Pipeline
 	for _, p := range pipelines {
-		if strings.Contains(strings.ToLower(fmt.Sprintf("%d", p.BuildNumber)), lower) {
+		if filterMatchesPipeline(p, lower) {
 			result = append(result, p)
-			continue
-		}
-		if strings.Contains(strings.ToLower(p.Target.RefName), lower) {
-			result = append(result, p)
-			continue
-		}
-		if strings.Contains(strings.ToLower(p.Target.Type), lower) {
-			result = append(result, p)
-			continue
-		}
-		if strings.Contains(strings.ToLower(p.State.Name), lower) {
-			result = append(result, p)
-			continue
-		}
-		if p.State.Result != nil && strings.Contains(strings.ToLower(p.State.Result.Name), lower) {
-			result = append(result, p)
-			continue
-		}
-		if p.Trigger.Name != "" && strings.Contains(strings.ToLower(p.Trigger.Name), lower) {
-			result = append(result, p)
-			continue
 		}
 	}
 	return result
@@ -63,51 +64,35 @@ func creatorName(c *bitbucket.Account) string {
 	return c.DisplayName
 }
 
-// statusStyle returns the appropriate style for a pipeline state.
-func statusStyle(state bitbucket.PipelineState) string {
-	switch state.Name {
-	case "IN_PROGRESS":
-		return "IN_PROGRESS"
-	case "PENDING":
-		return "PENDING"
-	case "COMPLETED":
-		if state.Result != nil {
-			switch state.Result.Name {
-			case "SUCCESSFUL":
-				return "SUCCESSFUL"
-			case "FAILED":
-				return "FAILED"
-			default:
-				return "STOPPED"
-			}
-		}
-		return "COMPLETED"
-	default:
-		return ""
+// resolveStepStatus resolves a step state to a canonical status string.
+func resolveStepStatus(state bitbucket.PipelineStepState) string {
+	resultName := ""
+	if state.Result != nil {
+		resultName = state.Result.Name
 	}
+	return resolvePipelineResult(state.Name, resultName)
 }
 
-// stepStatusStyle returns the appropriate style name for a step state.
-func stepStatusStyle(state bitbucket.PipelineStepState) string {
-	switch state.Name {
+// resolvePipelineResult resolves a pipeline/step state name and optional
+// result name into a canonical status string (IN_PROGRESS, PENDING,
+// SUCCESSFUL, FAILED, STOPPED, COMPLETED).
+func resolvePipelineResult(stateName, resultName string) string {
+	switch stateName {
 	case "IN_PROGRESS":
 		return "IN_PROGRESS"
 	case "PENDING":
 		return "PENDING"
 	case "COMPLETED":
-		if state.Result != nil {
-			switch state.Result.Name {
-			case "SUCCESSFUL":
-				return "SUCCESSFUL"
-			case "FAILED":
-				return "FAILED"
-			default:
-				return "STOPPED"
-			}
+		switch resultName {
+		case "SUCCESSFUL":
+			return "SUCCESSFUL"
+		case "FAILED":
+			return "FAILED"
+		default:
+			return "STOPPED"
 		}
-		return "COMPLETED"
 	default:
-		return ""
+		return stateName
 	}
 }
 

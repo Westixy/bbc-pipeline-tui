@@ -78,19 +78,16 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, fetchNextPage(m.Client, prev, params)
 			}
 
-		case "/":
-			return m, func() tea.Msg {
-				return filterPromptMsg{}
-			}
-
 		default:
-			if m.ListFilter != "" || msg.String() == "/" {
-				if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
-					m.ListFilter += msg.String()
+			if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
+				typed := msg.String()
+				// "/" enters filter mode; typed characters are appended
+				if m.ListFilter != "" || typed == "/" {
+					m.ListFilter += typed
 					m.ListCursor = 0
-					return m, nil
 				}
 			}
+			return m, nil
 		}
 
 		if msg.Type == tea.KeyBackspace || msg.String() == "backspace" {
@@ -104,8 +101,6 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-
-type filterPromptMsg struct{}
 
 // viewList renders the pipeline list screen, filling the available height.
 // contentHeight is the number of rows available for content.

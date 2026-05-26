@@ -170,11 +170,11 @@ type APIError struct {
 
 // PaginatedResponse is the common pagination wrapper.
 type PaginatedResponse struct {
-	Page    *int    `json:"page"`
-	Pagelen int     `json:"pagelen"`
-	Size    *int    `json:"size"`
-	Next    string  `json:"next"`
-	Prev    string  `json:"previous"`
+	Page    *int   `json:"page"`
+	Pagelen int    `json:"pagelen"`
+	Size    *int   `json:"size"`
+	Next    string `json:"next"`
+	Prev    string `json:"previous"`
 }
 
 // PaginatedPipelines is the paginated list of pipelines.
@@ -266,11 +266,11 @@ type PipelineVariable struct {
 
 // PipelineTarget holds the target (branch, commit, selector) of the pipeline.
 type PipelineTarget struct {
-	Type     string                  `json:"type"`
-	RefType  string                  `json:"ref_type,omitempty"`
-	RefName  string                  `json:"ref_name,omitempty"`
-	Commit   *Commit                 `json:"commit,omitempty"`
-	Selector *PipelineSelector       `json:"selector,omitempty"`
+	Type     string            `json:"type"`
+	RefType  string            `json:"ref_type,omitempty"`
+	RefName  string            `json:"ref_name,omitempty"`
+	Commit   *Commit           `json:"commit,omitempty"`
+	Selector *PipelineSelector `json:"selector,omitempty"`
 }
 
 // PipelineCommand is a command in a step.
@@ -315,25 +315,25 @@ type PipelineStepState struct {
 // Pipeline represents a Bitbucket pipeline run.
 type Pipeline struct {
 	Object
-	UUID                 string            `json:"uuid"`
-	BuildNumber          int               `json:"build_number"`
-	Creator              *Account          `json:"creator"`
-	Repository           *Repository       `json:"repository"`
-	Target               PipelineTarget    `json:"target"`
-	Trigger              PipelineTrigger   `json:"trigger"`
-	State                PipelineState     `json:"state"`
-	Variables            []PipelineVariable `json:"variables"`
-	CreatedOn            string            `json:"created_on"`
-	CompletedOn          string            `json:"completed_on"`
-	BuildSecondsUsed     int               `json:"build_seconds_used"`
+	UUID             string             `json:"uuid"`
+	BuildNumber      int                `json:"build_number"`
+	Creator          *Account           `json:"creator"`
+	Repository       *Repository        `json:"repository"`
+	Target           PipelineTarget     `json:"target"`
+	Trigger          PipelineTrigger    `json:"trigger"`
+	State            PipelineState      `json:"state"`
+	Variables        []PipelineVariable `json:"variables"`
+	CreatedOn        string             `json:"created_on"`
+	CompletedOn      string             `json:"completed_on"`
+	BuildSecondsUsed int                `json:"build_seconds_used"`
 }
 
 // ListPipelinesParams holds optional query parameters for listing pipelines.
 type ListPipelinesParams struct {
-	Pagelen  int
-	Page     int
-	Sort     string // e.g., "-created_on"
-	Fields   string
+	Pagelen int
+	Page    int
+	Sort    string // e.g., "-created_on"
+	Fields  string
 }
 
 // BuildPipelinePath builds the API path for a workspace/repo resource.
