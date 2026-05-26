@@ -64,6 +64,8 @@ func (m Model) viewContent(contentHeight int) string {
 		return m.viewLogs(contentHeight)
 	case ScreenRun:
 		return m.viewRun()
+	case ScreenProjects:
+		return m.viewProjects(contentHeight)
 	default:
 		return ""
 	}
@@ -82,8 +84,7 @@ func (m Model) viewHelp() string {
 			"enter: details",
 			"r: refresh",
 			"n: next page",
-			"1-9: select project",
-			"[/]: prev/next project",
+			"p: switch project",
 			"esc: back",
 			"q: quit",
 		}
@@ -108,6 +109,14 @@ func (m Model) viewHelp() string {
 			"tab: next field",
 			"enter: submit form",
 			"esc: back",
+			"q: quit",
+		}
+	case ScreenProjects:
+		items = []string{
+			"↑/↓ navigate",
+			"1-9: direct select",
+			"enter: confirm",
+			"esc: cancel",
 			"q: quit",
 		}
 	}

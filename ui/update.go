@@ -67,44 +67,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			return m.handleEsc()
 
-		case "tab", "]":
-			// Next project (list screen only)
-			if m.Screen == ScreenList && len(m.Projects) > 1 {
-				m.ActiveProject = (m.ActiveProject + 1) % len(m.Projects)
-				m.ListCursor = 0
-				m.ListFilter = ""
-				m.Pipelines = nil
-				m.ListState = StateLoading
-				return m, fetchPipelines(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug)
-			}
-			break
-
-		case "[":
-			// Previous project (list screen only)
-			if m.Screen == ScreenList && len(m.Projects) > 1 {
-				m.ActiveProject = (m.ActiveProject - 1 + len(m.Projects)) % len(m.Projects)
-				m.ListCursor = 0
-				m.ListFilter = ""
-				m.Pipelines = nil
-				m.ListState = StateLoading
-				return m, fetchPipelines(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug)
-			}
-			break
-
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-			// Direct project selection by number (list screen only)
-			if m.Screen == ScreenList {
-				idx := int(msg.String()[0] - '1') // 0-indexed
-				if idx >= 0 && idx < len(m.Projects) && idx != m.ActiveProject {
-					m.ActiveProject = idx
-					m.ListCursor = 0
-					m.ListFilter = ""
-					m.Pipelines = nil
-					m.ListState = StateLoading
-					return m, fetchPipelines(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug)
+		case "p":
+			// Open project selection screen (list and detail screens)
+			if m.Screen == ScreenList || m.Screen == ScreenDetail {
+				if len(m.Projects) > 1 {
+					m.Screen = ScreenProjects
 				}
 			}
-			break
+			return m, nil
 		}
 	}
 
@@ -118,6 +88,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateLogs(msg)
 	case ScreenRun:
 		return m.updateRun(msg)
+	case ScreenProjects:
+		return m.updateProjects(msg)
 	}
 
 	return m, tea.Batch(cmds...)

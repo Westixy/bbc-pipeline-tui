@@ -14,6 +14,7 @@ const (
 	ScreenDetail
 	ScreenLogs
 	ScreenRun
+	ScreenProjects
 )
 
 // State constants

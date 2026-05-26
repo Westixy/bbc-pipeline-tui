@@ -185,6 +185,21 @@ func renderStatusBadge(status string) string {
 	}
 }
 
+// pipelineTypeLabel produces a short display label for the pipeline type
+// in the format: custom:abc, branch:main, tag:v1.0, default, etc.
+func pipelineTypeLabel(target bitbucket.PipelineTarget) string {
+	if target.Selector != nil {
+		if target.Selector.Type == "custom" {
+			return "custom:" + target.Selector.Pattern
+		}
+		return target.Selector.Type + ":" + target.Selector.Pattern
+	}
+	if target.RefType != "" {
+		return target.RefType + ":" + target.RefName
+	}
+	return target.Type
+}
+
 // clampCursor ensures the cursor stays within valid bounds.
 func clampCursor(cursor, max int) int {
 	if cursor < 0 {

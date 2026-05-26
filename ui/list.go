@@ -126,14 +126,15 @@ func (m Model) viewList(contentHeight int) string {
 	// Measure status badge visual width once
 	sampleStatus := renderStatusBadge("IN_PROGRESS")
 	statusVisW := lipgloss.Width(sampleStatus)
-	// Layout: Build(6) | spacer | Branch(fixed) | spacer | Status(visual) | spacer | Author(fixed) | spacer | Trigger(flex) | spacer | Created(19) | spacer | Duration(10)
+	// Layout: Build(6) | Type(14) | Branch(flex) | Status(visual) | Author(20) | Trigger(flex) | Created(19) | Duration(10)
 	buildW := 6
+	typeW := 18
 	createdW := 19
 	durationW := 10
 	authorW := 20
 	statusW := statusVisW
-	// Fixed columns + 7 separators
-	fixed := buildW + statusW + createdW + durationW + authorW + 7
+	// Fixed columns + 8 separators (8 spacers between 9 columns)
+	fixed := buildW + typeW + statusW + createdW + durationW + authorW + 8
 	remaining := width - fixed
 	if remaining < 10 {
 		remaining = 10
@@ -187,6 +188,7 @@ func (m Model) viewList(contentHeight int) string {
 	// Column headers using padToWidth for alignment
 	header := DetailSectionStyle.Render(
 		padToWidth("#", buildW) + " " +
+			padToWidth("Type", typeW) + " " +
 			padToWidth("Branch", branchW) + " " +
 			padToWidth("Status", statusW) + " " +
 			padToWidth("Author", authorW) + " " +
@@ -203,6 +205,7 @@ func (m Model) viewList(contentHeight int) string {
 	for i := start; i < end; i++ {
 		p := filtered[i]
 		buildNum := fmt.Sprintf("#%d", p.BuildNumber)
+		pType := truncate(pipelineTypeLabel(p.Target), typeW)
 		branch := truncate(p.Target.RefName, branchW)
 		status := renderStatusBadge(mergeStatus(p.State))
 		author := truncate(creatorName(p.Creator), authorW)
@@ -211,6 +214,7 @@ func (m Model) viewList(contentHeight int) string {
 		duration := formatDuration(p.CreatedOn, p.CompletedOn, p.BuildSecondsUsed)
 
 		line := padToWidth(buildNum, buildW) + " " +
+			padToWidth(pType, typeW) + " " +
 			padToWidth(branch, branchW) + " " +
 			padToWidth(status, statusW) + " " +
 			padToWidth(author, authorW) + " " +
