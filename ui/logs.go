@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bbc/infra-pipeline-ui/bitbucket"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
+
+// ── Logs Update ─────────────────────────────────────────────────────────────
 
 // updateLogs handles messages for the log viewer screen.
 func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -18,290 +20,317 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.LogContent = msg.content
 		m.LogStepName = msg.stepName
-		m.LogState = StateReady
-		m.LogScrollOff = 0
 		m.LogSearchTerm = ""
-		m.LogSearchMode = false
-		m.LogMatchLines = nil
 		m.LogMatchIndex = -1
+		m.LogMatchLines = nil
+		m.LogScrollOff = 0
+		m.LogState = StateReady
 		return m, nil
 
 	case tea.KeyMsg:
-		logLines := strings.Split(m.LogContent, "\n")
-
-		// When search mode is active, capture text input before routing to
-		// navigation keys.  This keeps the "/" key out of the search term.
+		// Search mode
 		if m.LogSearchMode {
-			switch msg.String() {
-			case "esc":
-				m.LogSearchMode = false
-				return m, nil
-			case "enter":
-				m.LogSearchTerm = ""
-				m.LogSearchMode = false
-				return m, nil
-			case "backspace":
-				if len(m.LogSearchTerm) > 0 {
-					m.LogSearchTerm = m.LogSearchTerm[:len(m.LogSearchTerm)-1]
-					m.updateMatchLines()
-				}
-				return m, nil
-			}
-			// Capture printable runes (letters, digits, symbols)
-			if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-				m.LogSearchTerm += string(msg.Runes)
-				m.updateMatchLines()
-				return m, nil
-			}
-			// For any other key while searching, fall through to navigation.
+			return m.handleLogSearchInput(msg)
 		}
 
 		switch msg.String() {
-		case "r":
-			return m, nil
-
-		case "/":
-			m.LogSearchMode = true
-			return m, nil
-
 		case "up", "k":
 			if m.LogScrollOff > 0 {
 				m.LogScrollOff--
 			}
+			return m, nil
 
 		case "down", "j":
-			maxScroll := len(logLines) - 1
-			if maxScroll < 0 {
-				maxScroll = 0
-			}
+			maxScroll := m.maxLogScroll()
 			if m.LogScrollOff < maxScroll {
 				m.LogScrollOff++
 			}
-
-		case "pgup", "u":
-			// Page up: scroll up by half the visible area (conservative default)
-			pageSize := (m.Height - 9) / 2
-			if pageSize < 1 {
-				pageSize = 1
-			}
-			m.LogScrollOff -= pageSize
-			if m.LogScrollOff < 0 {
-				m.LogScrollOff = 0
-			}
-
-		case "pgdown", "d", " ":
-			// Page down: scroll down by half the visible area
-			pageSize := (m.Height - 9) / 2
-			if pageSize < 1 {
-				pageSize = 1
-			}
-			maxScroll := len(logLines) - pageSize
-			if maxScroll < 0 {
-				maxScroll = 0
-			}
-			m.LogScrollOff += pageSize
-			if m.LogScrollOff > maxScroll {
-				m.LogScrollOff = maxScroll
-			}
-
-		case "n":
-			// Next match
-			m.nextMatch()
 			return m, nil
 
-		case "N":
-			// Previous match
-			m.prevMatch()
+		case "/":
+			m.LogSearchMode = true
+			m.LogSearchTerm = ""
+			m.LogMatchIndex = -1
+			m.LogMatchLines = nil
 			return m, nil
 
 		case "v":
-			// Parse pipeline variables from log and navigate to run form
-			vars := ParsePipelineVariablesFromLog(m.LogContent)
-			m.Screen = ScreenRun
-			m.RunState = StateReady
-			m.RunFocus = runFieldBranch
-			m.RunBranch.SetValue("")
-			m.RunBranch.Focus()
-			m.RunError = ""
-			m.RunSuccessMsg = ""
-			m.RunVarCursor = 0
-			m.RunEditMode = false
-			m.RunEditorInput.SetValue("")
-			m.RunVars = nil
-			if len(vars) > 0 {
-				// Pre-populate variables parsed from log
-				for _, v := range vars {
-					m.RunVars = append(m.RunVars, bitbucket.PipelineVariable{
-						Key:   v.Key,
-						Value: v.Value,
-					})
+			// Toggle variable display: parse from log content and show parsed vars
+			if m.LogShowVars {
+				m.LogShowVars = false
+			} else {
+				if m.LogContent != "" {
+					m.ParsedLogVars = ParsePipelineVariablesFromLog(m.LogContent)
 				}
+				m.LogShowVars = true
 			}
-			// Also pre-populate branch and selector if pipeline is selected
-			if m.SelectedPipeline != nil {
-				m.RunBranch.SetValue(m.SelectedPipeline.Target.RefName)
-				if m.SelectedPipeline.Target.Selector != nil {
-					m.RunSelector.SetValue(m.SelectedPipeline.Target.Selector.Pattern)
-				} else {
-					m.RunSelector.SetValue("")
+			return m, nil
+
+		case "n":
+			// Next search match
+			if len(m.LogMatchLines) > 0 {
+				m.LogMatchIndex++
+				if m.LogMatchIndex >= len(m.LogMatchLines) {
+					m.LogMatchIndex = 0
 				}
+				// Scroll to match
+				m.scrollToMatchLine(m.LogMatchLines[m.LogMatchIndex])
 			}
+			return m, nil
+
+		case "N", "shift+n":
+			// Previous search match
+			if len(m.LogMatchLines) > 0 {
+				m.LogMatchIndex--
+				if m.LogMatchIndex < 0 {
+					m.LogMatchIndex = len(m.LogMatchLines) - 1
+				}
+				m.scrollToMatchLine(m.LogMatchLines[m.LogMatchIndex])
+			}
+			return m, nil
+
+		case "esc":
+			// If in vars mode, return to log
+			if m.LogShowVars {
+				m.LogShowVars = false
+				return m, nil
+			}
+			// Clear search if active, otherwise go back to detail
+			if len(m.LogMatchLines) > 0 {
+				m.LogSearchTerm = ""
+				m.LogMatchIndex = -1
+				m.LogMatchLines = nil
+			} else {
+				m.Screen = ScreenDetail
+			}
+			return m, nil
+
+		case "enter", " ":
+			// Clear search
+			m.LogSearchTerm = ""
+			m.LogMatchIndex = -1
+			m.LogMatchLines = nil
 			return m, nil
 		}
 	}
-
 	return m, nil
 }
 
-// viewLogs renders the step log viewer screen, filling the available height.
+// handleLogSearchInput handles key presses while in search mode.
+func (m *Model) handleLogSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		// Execute search
+		m.LogSearchMode = false
+		m.performLogSearch()
+		return m, nil
+
+	case "esc":
+		// Cancel search
+		m.LogSearchMode = false
+		m.LogSearchTerm = ""
+		m.LogMatchIndex = -1
+		m.LogMatchLines = nil
+		return m, nil
+
+	default:
+		if len(msg.String()) == 1 && msg.String() >= " " {
+			m.LogSearchTerm += msg.String()
+		}
+		return m, nil
+	}
+}
+
+// performLogSearch finds all lines matching the search term.
+func (m *Model) performLogSearch() {
+	if m.LogSearchTerm == "" || m.LogContent == "" {
+		return
+	}
+	lower := strings.ToLower(m.LogSearchTerm)
+	lines := strings.Split(m.LogContent, "\n")
+	m.LogMatchLines = nil
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), lower) {
+			m.LogMatchLines = append(m.LogMatchLines, i)
+		}
+	}
+	if len(m.LogMatchLines) > 0 {
+		m.LogMatchIndex = 0
+		m.scrollToMatchLine(m.LogMatchLines[0])
+	}
+}
+
+// scrollToMatchLine scrolls the log view so the given line is visible.
+func (m *Model) scrollToMatchLine(line int) {
+	if m.LogScrollOff <= line && line < m.LogScrollOff+m.logViewportHeight() {
+		return
+	}
+	m.LogScrollOff = line - m.logViewportHeight()/2
+	if m.LogScrollOff < 0 {
+		m.LogScrollOff = 0
+	}
+}
+
+// maxLogScroll returns the maximum scroll offset for the log content.
+func (m Model) maxLogScroll() int {
+	lines := strings.Count(m.LogContent, "\n") + 1
+	maxScroll := lines - m.logViewportHeight()
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+// logViewportHeight returns the available number of lines for log content.
+func (m Model) logViewportHeight() int {
+	// Header line + search bar + scroll info + bottom padding
+	overhead := 5
+	h := m.Height - overhead
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+// ── Logs View ───────────────────────────────────────────────────────────────
+
+// viewLogs renders the step log viewer with line numbers, search highlighting,
+// and match counter.
 func (m Model) viewLogs(contentHeight int) string {
-	switch m.LogState {
-	case StateLoading:
-		return viewLoading("Loading log for step: " + m.LogStepName + "...")
-	case StateError:
+	if m.LogState == StateLoading {
+		return viewLoading("Loading step log")
+	}
+	if m.LogState == StateError {
 		return viewError(m.LogError)
+	}
+	if m.LogContent == "" {
+		return viewEmpty("No log content", "Press 'r' to retry or 'esc' to go back")
+	}
+
+	avail := m.Width - 4
+
+	// ── Search bar ────────────────────────────────────────────────────────
+	var searchBar string
+	if m.LogSearchMode {
+		searchBar = FilterStyle.Render(" Search: " + m.LogSearchTerm + "_ ")
+	} else if m.LogSearchTerm != "" {
+		searchBar = FilterStyle.Render(" Search: " + m.LogSearchTerm + " ")
+	} else {
+		searchBar = DimmedStyle.Render(" Press / to search, esc to go back")
+	}
+
+	// Match counter
+	if len(m.LogMatchLines) > 0 && m.LogMatchIndex >= 0 {
+		searchBar += "  " + LogMatchCounterStyle.Render(
+			fmt.Sprintf("Match %d of %d", m.LogMatchIndex+1, len(m.LogMatchLines)),
+		)
+	}
+
+	// ── Parsed variables display ──────────────────────────────────────────
+	if m.LogShowVars {
+		// Show parsed pipeline variables
+		sectionTitle := SectionTitleStyle.Render(fmt.Sprintf("Pipeline Variables (%d)", len(m.ParsedLogVars)))
+		var content string
+		if len(m.ParsedLogVars) == 0 {
+			content = viewEmpty("No pipeline variables found",
+				"The step log did not contain a \"Pipeline variables:\" block")
+		} else {
+			content = CardStyle.Width(avail - 4).Render(buildVarList(m.ParsedLogVars, avail-8))
+		}
+
+		// Vars-only toggle hint
+		varsHint := BadgeStyle.Render(" variables mode ") + " " + DimmedStyle.Render("Press v to return to log")
+
+		return lipgloss.JoinVertical(lipgloss.Left,
+			searchBar,
+			DividerStyle.Render(strings.Repeat("─", avail)),
+			lipgloss.JoinVertical(lipgloss.Left, sectionTitle, content),
+			DividerStyle.Render(strings.Repeat("─", avail)),
+			DimmedStyle.Render(varsHint),
+		)
+	}
+
+	// ── Log content with line numbers ─────────────────────────────────────
+	lines := strings.Split(m.LogContent, "\n")
+	totalLines := len(lines)
+	lowerSearch := strings.ToLower(m.LogSearchTerm)
+
+	viewportH := contentHeight - 4 // search bar + divider + help
+	if viewportH < 1 {
+		viewportH = 1
+	}
+	// Use stored scroll offset
+	scrollOff := m.LogScrollOff
+
+	end := scrollOff + viewportH
+	if end > totalLines {
+		end = totalLines
+	}
+	start := scrollOff
+	if start > end {
+		start = end
+	}
+	visible := lines[start:end]
+
+	// Scroll indicator
+	scrollPct := 0
+	if totalLines > viewportH {
+		scrollPct = scrollOff * 100 / (totalLines - viewportH)
+	}
+	scrollInfo := DimmedStyle.Render(
+		fmt.Sprintf("Lines %d-%d of %d (%d%%)",
+			start+1, end, totalLines, scrollPct))
+
+	// Pre-compute highlight positions for each visible line
+	highlightPositions := make([][2]int, len(visible))
+	if m.LogSearchTerm != "" && m.LogMatchIndex >= 0 {
+		for i, line := range visible {
+			absLineNum := start + i
+			// Highlight if this is the current match
+			if absLineNum == m.LogMatchLines[m.LogMatchIndex] {
+				idx := strings.Index(strings.ToLower(line), lowerSearch)
+				if idx >= 0 {
+					highlightPositions[i] = [2]int{idx, idx + len(m.LogSearchTerm)}
+				}
+			}
+		}
 	}
 
 	var sb strings.Builder
+	for i, line := range visible {
+		lineNum := start + i + 1
+		lineNumStr := LogLineNumStyle.Render(fmt.Sprintf("%d ", lineNum))
 
-	// Search bar
-	if m.LogSearchTerm != "" {
-		sb.WriteString(FilterStyle.Render(fmt.Sprintf("Search: %s", m.LogSearchTerm)))
-		sb.WriteString("\n")
-	} else {
-		sb.WriteString(HelpStyle.Render("Press / to search, enter to clear search"))
-		sb.WriteString("\n")
-	}
-
-	// Match info / status bar at bottom
-	if m.LogSearchTerm != "" && len(m.LogMatchLines) > 0 {
-		status := fmt.Sprintf("Match %d/%d", m.LogMatchIndex+1, len(m.LogMatchLines))
-		sb.WriteString(HelpStyle.Render(status))
-	} else if m.LogSearchTerm != "" {
-		sb.WriteString(HelpStyle.Render("No matches"))
-	}
-	sb.WriteString("\n")
-
-	// Log content viewport
-	viewportHeight := contentHeight - 2 // subtract search bar and status line
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-
-	if m.LogContent == "" {
-		sb.WriteString(DimmedStyle.Render("No log output available"))
-	} else {
-		logLines := strings.Split(m.LogContent, "\n")
-
-		// Clamp scroll offset
-		maxScroll := len(logLines) - viewportHeight
-		if maxScroll < 0 {
-			maxScroll = 0
+		// Render with optional highlight
+		if hp := highlightPositions[i]; hp[0] < hp[1] {
+			before := line[:hp[0]]
+			match := line[hp[0]:hp[1]]
+			after := line[hp[1]:]
+			sb.WriteString(lineNumStr)
+			sb.WriteString(before)
+			sb.WriteString(LogHighlightStyle.Render(match))
+			sb.WriteString(strings.TrimRight(after, "\r"))
+		} else {
+			sb.WriteString(lineNumStr)
+			sb.WriteString(strings.TrimRight(line, "\r"))
 		}
-		if m.LogScrollOff > maxScroll {
-			m.LogScrollOff = maxScroll
-		}
-		if m.LogScrollOff < 0 {
-			m.LogScrollOff = 0
-		}
-
-		start := m.LogScrollOff
-		end := start + viewportHeight
-		if end > len(logLines) {
-			end = len(logLines)
-		}
-
-		for i := start; i < end; i++ {
-			line := logLines[i]
-			if m.LogSearchTerm != "" {
-				line = highlightText(line, m.LogSearchTerm)
-			}
-			sb.WriteString(line)
+		if i < len(visible)-1 {
 			sb.WriteString("\n")
 		}
 	}
 
-	return sb.String()
-}
+	// ── Rendered variables indicator ──────────────────────────────────────
+	varsNote := ""
+	if len(m.ParsedLogVars) > 0 {
+		varsNote = "  " + BadgeStyle.Render(fmt.Sprintf(" %d vars parsed ", len(m.ParsedLogVars)))
+	}
 
-// highlightText highlights occurrences of term in text.
-func highlightText(text, term string) string {
-	if term == "" {
-		return text
-	}
-	lower := strings.ToLower(text)
-	termLower := strings.ToLower(term)
-	var result strings.Builder
-	lastIdx := 0
-	for {
-		idx := strings.Index(lower[lastIdx:], termLower)
-		if idx == -1 {
-			result.WriteString(text[lastIdx:])
-			break
-		}
-		absIdx := lastIdx + idx
-		result.WriteString(text[lastIdx:absIdx])
-		result.WriteString(LogHighlightStyle.Render(text[absIdx : absIdx+len(term)]))
-		lastIdx = absIdx + len(term)
-	}
-	return result.String()
-}
-
-// updateMatchLines finds all line numbers containing the search term and sets
-// the match index to the first match that is on or after the current scroll
-// position (or 0 if none found).
-func (m *Model) updateMatchLines() {
-	m.LogMatchLines = nil
-	m.LogMatchIndex = -1
-	if m.LogSearchTerm == "" {
-		return
-	}
-	lines := strings.Split(m.LogContent, "\n")
-	termLower := strings.ToLower(m.LogSearchTerm)
-	for i, line := range lines {
-		if strings.Contains(strings.ToLower(line), termLower) {
-			m.LogMatchLines = append(m.LogMatchLines, i)
-		}
-	}
-	// Position cursor at the first match on or after the current scroll offset
-	if len(m.LogMatchLines) == 0 {
-		return
-	}
-	bestIdx := 0
-	for i, lineNo := range m.LogMatchLines {
-		if lineNo >= m.LogScrollOff {
-			bestIdx = i
-			break
-		}
-		bestIdx = i // keep the last before scroll offset
-	}
-	m.LogMatchIndex = bestIdx
-	// Scroll so that the selected match is visible
-	if m.LogMatchIndex >= 0 && m.LogMatchIndex < len(m.LogMatchLines) {
-		m.LogScrollOff = m.LogMatchLines[m.LogMatchIndex]
-	}
-}
-
-// nextMatch moves to the next search match.
-func (m *Model) nextMatch() {
-	if len(m.LogMatchLines) == 0 {
-		return
-	}
-	m.LogMatchIndex++
-	if m.LogMatchIndex >= len(m.LogMatchLines) {
-		m.LogMatchIndex = 0
-	}
-	m.LogScrollOff = m.LogMatchLines[m.LogMatchIndex]
-}
-
-// prevMatch moves to the previous search match.
-func (m *Model) prevMatch() {
-	if len(m.LogMatchLines) == 0 {
-		return
-	}
-	m.LogMatchIndex--
-	if m.LogMatchIndex < 0 {
-		m.LogMatchIndex = len(m.LogMatchLines) - 1
-	}
-	m.LogScrollOff = m.LogMatchLines[m.LogMatchIndex]
+	// ── Combine ───────────────────────────────────────────────────────────
+	return lipgloss.JoinVertical(lipgloss.Left,
+		searchBar,
+		DividerStyle.Render(strings.Repeat("─", avail)),
+		sb.String(),
+		DividerStyle.Render(strings.Repeat("─", avail)),
+		DimmedStyle.Render(scrollInfo+varsNote),
+	)
 }

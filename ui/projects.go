@@ -29,7 +29,7 @@ func (m Model) updateProjects(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-			idx := int(msg.String()[0] - '1') // 0-indexed
+			idx := int(msg.String()[0] - '1')
 			if idx >= 0 && idx < len(m.Projects) {
 				m.ActiveProject = idx
 			}
@@ -55,26 +55,28 @@ func (m Model) updateProjects(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// viewProjects renders the project selection overlay/modal.
+// viewProjects renders the project selection overlay.
 func (m Model) viewProjects(contentHeight int) string {
 	if contentHeight < 4 {
 		return ""
 	}
 
-	var sb strings.Builder
+	avail := m.Width - 4
 
-	sb.WriteString(DetailSectionStyle.Render("Select Project"))
+	var sb strings.Builder
+	sb.WriteString(CardTitleStyle.Render("Select Project"))
+	sb.WriteString("\n")
+	sb.WriteString(DividerStyle.Render(strings.Repeat("─", avail)))
 	sb.WriteString("\n\n")
 
-	// Calculate how many projects fit in the viewport.
-	// Subtract header (2 lines) + footer divider (1 line) + help (1 line) = 4 non-item lines.
+	// Calculate how many projects fit in the viewport
 	nonItemLines := 4
 	viewportHeight := contentHeight - nonItemLines
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
 
-	// Slice visible projects to fit viewport, centered on ActiveProject.
+	// Slice visible projects to fit viewport
 	start := m.ActiveProject - viewportHeight/2
 	if start < 0 {
 		start = 0
@@ -83,7 +85,6 @@ func (m Model) viewProjects(contentHeight int) string {
 	if end > len(m.Projects) {
 		end = len(m.Projects)
 	}
-	// Re-adjust start if we hit the bottom
 	if end-start < viewportHeight && start > 0 {
 		start = end - viewportHeight
 		if start < 0 {
@@ -93,19 +94,30 @@ func (m Model) viewProjects(contentHeight int) string {
 
 	for i := start; i < end; i++ {
 		p := m.Projects[i]
-		label := fmt.Sprintf("[%d] %s/%s", i+1, p.Workspace, p.RepoSlug)
+
+		// Build a card-like row with workspace/repo info
+		label := fmt.Sprintf("[%d]  %s / %s", i+1, p.Workspace, p.RepoSlug)
+
+		rowStyle := ListNormalStyle
+		prefix := "  "
 		if i == m.ActiveProject {
-			sb.WriteString(ListCursorStyle.Render("▶ " + label))
-		} else {
-			sb.WriteString("  " + label)
+			rowStyle = ListCursorStyle
+			prefix = "▶ "
+		} else if i%2 == 1 {
+			rowStyle = ListAltStyle
 		}
+
+		sb.WriteString(rowStyle.Render(prefix + label))
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(DimmedStyle.Render(strings.Repeat("─", 40)))
+	sb.WriteString(DividerStyle.Render(strings.Repeat("─", avail)))
 	sb.WriteString("\n")
-	sb.WriteString(HelpStyle.Render("↑/↓ navigate │ 1-9 direct │ enter select │ esc cancel"))
+	sb.WriteString(HelpGroupStyle.Render("Navigate") + " " + HelpKeyStyle.Render("↑↓") + "  " +
+		HelpGroupStyle.Render("Select") + " " + HelpKeyStyle.Render("1-9") + "  " +
+		HelpGroupStyle.Render("Confirm") + " " + HelpKeyStyle.Render("enter") + "  " +
+		HelpGroupStyle.Render("Cancel") + " " + HelpKeyStyle.Render("esc"))
 
 	return sb.String()
 }

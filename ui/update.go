@@ -122,7 +122,7 @@ func (m Model) handleEsc() (tea.Model, tea.Cmd) {
 		m.RunVars = []bitbucket.PipelineVariable{}
 		m.RunVarCursor = 0
 		m.RunEditMode = false
-		m.RunFocus = runFieldBranch
+		m.RunFocus = 0
 		m.RunState = StateReady
 		return m, nil
 	default:

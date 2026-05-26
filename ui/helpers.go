@@ -48,12 +48,15 @@ func filteredPipelines(pipelines []bitbucket.Pipeline, filter string) []bitbucke
 	return result
 }
 
-// truncate truncates a string to maxLen, appending "..." if truncated.
+// truncate truncates a string to maxLen, appending "…" if truncated.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	if maxLen < 1 {
+		return ""
+	}
+	return s[:maxLen-2] + "…"
 }
 
 // creatorName returns the display name of the pipeline creator, or "N/A" if nil.
@@ -108,6 +111,33 @@ func formatTime(ts string) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+// formatRelativeTime returns a short relative time string (e.g. "2m ago", "1h ago", "3d ago").
+func formatRelativeTime(ts string) string {
+	if ts == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ""
+	}
+	d := time.Since(t)
+	if d < 0 {
+		d = -d
+	}
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("Jan 02")
+	}
+}
+
 // padToWidth pads a string (which may contain ANSI escape codes) to the
 // target visual width by appending spaces.
 func padToWidth(s string, w int) string {
@@ -127,14 +157,29 @@ func formatDuration(createdOn, completedOn string, buildSecondsUsed int) string 
 		if err1 == nil && err2 == nil {
 			d := completed.Sub(created)
 			if d > 0 {
-				return formatDurationSeconds(int(d.Seconds()))
+				return formatDurationCompact(int(d.Seconds()))
 			}
 		}
 	}
 	if buildSecondsUsed > 0 {
-		return formatDurationSeconds(buildSecondsUsed)
+		return formatDurationCompact(buildSecondsUsed)
 	}
-	return "N/A"
+	return "—"
+}
+
+// formatDurationCompact formats a duration in seconds to a compact string.
+func formatDurationCompact(seconds int) string {
+	if seconds <= 0 {
+		return "—"
+	}
+	d := time.Duration(seconds) * time.Second
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // formatDurationSeconds formats a duration in seconds to a human-readable string.
@@ -156,22 +201,40 @@ func formatDurationSeconds(seconds int) string {
 func renderStatusBadge(status string) string {
 	switch status {
 	case "IN_PROGRESS":
-		return StatusInProgress.Render("◉ IN_PROGRESS")
+		return StatusInProgress.Render(" ◉ IN_PROGRESS ")
 	case "PENDING":
-		return StatusPending.Render("◌ PENDING")
+		return StatusPending.Render(" ◌ PENDING ")
 	case "SUCCESSFUL":
-		return StatusSuccessful.Render("✓ SUCCESSFUL")
+		return StatusSuccessful.Render(" ✓ SUCCESSFUL ")
 	case "FAILED":
-		return StatusFailed.Render("✗ FAILED")
+		return StatusFailed.Render(" ✗ FAILED ")
 	case "STOPPED":
-		return StatusStopped.Render("⊘ STOPPED")
+		return StatusStopped.Render(" ⊘ STOPPED ")
+	default:
+		return DimmedStyle.Render(" " + status + " ")
+	}
+}
+
+// statusBadgeCompact returns a short colored status pill for the pipeline list.
+func statusBadgeCompact(status string) string {
+	switch status {
+	case "IN_PROGRESS":
+		return StatusInProgress.Render("●IN_PROG")
+	case "PENDING":
+		return StatusPending.Render("◌PENDING")
+	case "SUCCESSFUL":
+		return StatusSuccessful.Render("✓SUCCESS ")
+	case "FAILED":
+		return StatusFailed.Render("✗FAILED  ")
+	case "STOPPED":
+		return StatusStopped.Render("⊘STOPPED")
 	default:
 		return DimmedStyle.Render(status)
 	}
 }
 
 // pipelineTypeLabel produces a short display label for the pipeline type
-// in the format: custom:abc, branch:main, tag:v1.0, default, etc.
+// in the format: branch:main, tag:v1.0, custom:abc, default.
 func pipelineTypeLabel(target bitbucket.PipelineTarget) string {
 	if target.Selector != nil {
 		if target.Selector.Type == "custom" {
@@ -183,6 +246,23 @@ func pipelineTypeLabel(target bitbucket.PipelineTarget) string {
 		return target.RefType + ":" + target.RefName
 	}
 	return target.Type
+}
+
+// pipelineTypeIcon returns a simple icon for a pipeline type.
+func pipelineTypeIcon(target bitbucket.PipelineTarget) string {
+	if target.Selector != nil {
+		return "⚙"
+	}
+	switch target.RefType {
+	case "branch":
+		return "⎇"
+	case "tag":
+		return "🏷"
+	case "commit":
+		return "◆"
+	default:
+		return "●"
+	}
 }
 
 // clampCursor ensures the cursor stays within valid bounds.
@@ -197,6 +277,34 @@ func clampCursor(cursor, max int) int {
 		return max - 1
 	}
 	return cursor
+}
+
+// renderScrollbar returns a vertical scrollbar string for the given position.
+// height is the total number of visible rows, pos is the current offset,
+// total is the total number of items.
+func renderScrollbar(height, pos, total int) string {
+	if total <= height || height < 1 {
+		return ""
+	}
+	thumbSize := height * height / total
+	if thumbSize < 1 {
+		thumbSize = 1
+	}
+	thumbPos := pos * height / total
+	if thumbPos+thumbSize > height {
+		thumbPos = height - thumbSize
+	}
+
+	var sb strings.Builder
+	for i := 0; i < height; i++ {
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString(ScrollThumbStyle.Render("█"))
+		} else {
+			sb.WriteString(ScrollTrackStyle.Render("│"))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // varBlockRe matches the "Pipeline variables:" block in step log output.

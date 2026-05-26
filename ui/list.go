@@ -4,258 +4,279 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bbc/infra-pipeline-ui/bitbucket"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
+
+// ── List Update ─────────────────────────────────────────────────────────────
 
 // updateList handles messages for the pipeline list screen.
 func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case pipelinesLoadedMsg:
 		if msg.err != nil {
-			m.handleErrorMsg("list", msg.err)
-			return m, nil
+			m.ListState = StateError
+			m.ListError = msg.err.Error()
+		} else {
+			m.Pipelines = msg.pipelines
+			m.NextPageURL = msg.nextPageURL
+			m.ListCursor = 0
+			m.ListState = StateReady
 		}
-		m.Pipelines = msg.pipelines
-		m.NextPageURL = msg.nextPageURL
-		m.ListState = StateReady
-		m.ListCursor = 0
-		m.ListScrollOff = 0
 		return m, nil
 
 	case nextPageLoadedMsg:
 		if msg.err != nil {
-			m.handleErrorMsg("list", msg.err)
-			return m, nil
-		}
-		if len(msg.pipelines) > 0 {
+			m.ListState = StateError
+			m.ListError = msg.err.Error()
+		} else {
 			m.Pipelines = append(m.Pipelines, msg.pipelines...)
 			m.NextPageURL = msg.nextPageURL
+			m.ListState = StateReady
 		}
 		return m, nil
 
 	case tea.KeyMsg:
-		filtered := filteredPipelines(m.Pipelines, m.ListFilter)
-
 		switch msg.String() {
 		case "up", "k":
-			m.ListCursor = clampCursor(m.ListCursor-1, len(filtered))
+			if m.ListCursor > 0 {
+				m.ListCursor--
+			}
+			return m, nil
 
 		case "down", "j":
-			m.ListCursor = clampCursor(m.ListCursor+1, len(filtered))
+			if m.ListCursor < len(m.Pipelines)-1 {
+				m.ListCursor++
+			}
+			return m, nil
 
 		case "enter":
-			if len(filtered) > 0 && m.ListCursor >= 0 && m.ListCursor < len(filtered) {
-				p := filtered[m.ListCursor]
-				m.SelectedPipeline = &p
-				m.Screen = ScreenDetail
-				m.DetailState = StateLoading
-				m.DetailError = ""
-				cmd := fetchPipelineDetail(m.Client, m.Projects[m.ActiveProject].Workspace,
-					m.Projects[m.ActiveProject].RepoSlug, p.UUID)
-				return m, cmd
+			if len(m.Pipelines) == 0 {
+				return m, nil
 			}
+			// Navigate to pipeline detail
+			m.SelectedPipeline = &m.Pipelines[m.ListCursor]
+			m.Screen = ScreenDetail
+			m.StepCursor = 0
+			m.DetailState = StateLoading
+			m.DetailError = ""
+			m.ParsedLogVars = nil
+			m.LogShowVars = false
+			return m, tea.Batch(
+				fetchPipelineDetail(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug, m.SelectedPipeline.UUID),
+				fetchConfigVars(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug),
+				fetchLogVarsForPipeline(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug, m.SelectedPipeline.UUID),
+			)
 
 		case "r":
 			m.ListState = StateLoading
 			m.Pipelines = nil
-			m.ListFilter = ""
-			m.ListScrollOff = 0
-			return m, fetchPipelines(m.Client, m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug)
+			m.ListCursor = 0
+			return m, fetchPipelines(m.Client,
+				m.Projects[m.ActiveProject].Workspace,
+				m.Projects[m.ActiveProject].RepoSlug)
+
+		case "p":
+			// Show project switcher
+			m.Screen = ScreenProjects
+			return m, nil
 
 		case "n":
-			if m.NextPageURL != "" {
-				prev := &bitbucket.PaginatedPipelines{
-					PaginatedResponse: bitbucket.PaginatedResponse{
-						Next: m.NextPageURL,
-					},
-				}
-				params := &bitbucket.ListPipelinesParams{
-					Pagelen: 25,
-					Sort:    "-created_on",
-				}
-				return m, fetchNextPage(m.Client, prev, params)
-			}
-
-		default:
-			if len(msg.String()) == 1 && msg.String()[0] >= 32 && msg.String()[0] < 127 {
-				typed := msg.String()
-				// "/" enters filter mode; typed characters are appended
-				if m.ListFilter != "" || typed == "/" {
-					m.ListFilter += typed
-					m.ListCursor = 0
-				}
+			// Load next page
+			if m.NextPageURL != "" && m.ListState == StateReady {
+				m.ListState = StateLoading
+				return m, fetchNextPage(m.Client, m.NextPageURL)
 			}
 			return m, nil
-		}
 
-		if msg.Type == tea.KeyBackspace || msg.String() == "backspace" {
-			if len(m.ListFilter) > 0 {
-				m.ListFilter = m.ListFilter[:len(m.ListFilter)-1]
-				m.ListCursor = 0
+		case "/":
+			// Start filtering (built into list via ListFilter)
+			return m, nil
+
+		case "esc":
+			m.ListFilter = ""
+			return m, nil
+
+		default:
+			// Any other key — add to filter if printable
+			if len(msg.String()) == 1 && msg.String() >= " " && msg.String() != "/" {
+				m.ListFilter += msg.String()
+				// Clamp cursor to filtered results
+				filtered := filteredPipelines(m.Pipelines, m.ListFilter)
+				if m.ListCursor >= len(filtered) && len(filtered) > 0 {
+					m.ListCursor = len(filtered) - 1
+				}
 			}
 			return m, nil
 		}
 	}
-
 	return m, nil
 }
 
-// viewList renders the pipeline list screen, filling the available height.
-// contentHeight is the number of rows available for content.
+// ── List View ───────────────────────────────────────────────────────────────
+
+// viewList renders the pipeline list with column headers, zebra-striped rows,
+// and a filter bar.
 func (m Model) viewList(contentHeight int) string {
-	switch m.ListState {
-	case StateLoading:
-		return viewLoading("Loading pipelines for " + m.FullRepoName() + "...")
-	case StateError:
+	if m.ListState == StateLoading {
+		return viewLoading("Loading pipelines")
+	}
+	if m.ListState == StateError {
 		return viewError(m.ListError)
 	}
 
 	filtered := filteredPipelines(m.Pipelines, m.ListFilter)
-	width := m.Width - 2 // account for content padding
-	if width < 40 {
-		width = 40
+
+	// Calculate column widths dynamically
+	// Columns: #, Status, Branch, Type, Trigger, Duration, Created
+	// Adapt to available width — approximate based on terminal width
+	avail := m.Width - 4 // padding
+
+	// Fixed: # (5), Duration (7), Type (12)
+	// Flexible: Status (14), Branch, Trigger, Created (16)
+	fixedWidths := 5 + 14 + 7 + 16 // 42
+	_ = 3                          // Branch, Trigger, Type
+	// Don't let fixed exceed available
+	if fixedWidths >= avail {
+		fixedWidths = avail - 20
+		if fixedWidths < 40 {
+			fixedWidths = 40
+		}
+	}
+	colBranch := 16
+	colTrigger := 12
+	colType := 12
+	remaining := avail - 42
+	if remaining > 0 {
+		// Distribute remaining to flexible columns
+		colBranch += remaining / 3
+		colTrigger += remaining / 3
+		colType += remaining / 3
+	}
+	if colBranch > 30 {
+		colBranch = 30
+	}
+	if colTrigger > 20 {
+		colTrigger = 20
 	}
 
-	// Measure status badge visual width once
-	sampleStatus := renderStatusBadge("IN_PROGRESS")
-	statusVisW := lipgloss.Width(sampleStatus)
-	// Layout: Build(6) | Type(14) | Branch(flex) | Status(visual) | Author(20) | Trigger(flex) | Created(19) | Duration(10)
-	buildW := 6
-	typeW := 18
-	createdW := 19
-	durationW := 10
-	authorW := 20
-	statusW := statusVisW
-	// Fixed columns + 8 separators (8 spacers between 9 columns)
-	fixed := buildW + typeW + statusW + createdW + durationW + authorW + 8
-	remaining := width - fixed
-	if remaining < 10 {
-		remaining = 10
-	}
-	branchW := remaining * 38 / 100
-	triggerW := remaining - branchW
-	if triggerW < 6 {
-		triggerW = 6
-	}
+	bNumW := 5
+	bStatusW := 14
+	bBranchW := colBranch
+	bTypeW := colType
+	bTriggerW := colTrigger
+	bDurW := 7
+	bCreatedW := 16
 
-	// Compute viewport lines available for items (subtract header, filter, divider, footer)
-	nonItemLines := 1 // column header
-	if m.ListFilter != "" {
-		nonItemLines += 1 // filter bar
-	}
-	nonItemLines += 2 // divider + pagination footer
-	viewportHeight := contentHeight - nonItemLines
-	if viewportHeight < 0 {
-		viewportHeight = 0
-	}
-
-	// Auto-scroll: ensure cursor is visible in viewport
-	if m.ListCursor < m.ListScrollOff {
-		m.ListScrollOff = m.ListCursor
-	}
-	if m.ListCursor >= m.ListScrollOff+viewportHeight && viewportHeight > 0 {
-		m.ListScrollOff = m.ListCursor - viewportHeight + 1
-	}
-	if m.ListScrollOff < 0 {
-		m.ListScrollOff = 0
-	}
-
-	// Slice items to viewport
-	start := m.ListScrollOff
-	end := start + viewportHeight
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	if start > len(filtered) {
-		start = len(filtered)
-	}
+	// Build header
+	headerLine := ListHeaderStyle.Render(
+		" " +
+			padToWidth("#", bNumW) +
+			padToWidth("STATUS", bStatusW) +
+			padToWidth("BRANCH", bBranchW) +
+			padToWidth("TYPE", bTypeW) +
+			padToWidth("TRIGGER", bTriggerW) +
+			padToWidth("DUR", bDurW) +
+			padToWidth("CREATED", bCreatedW))
 
 	var sb strings.Builder
-
-	// Filter bar
-	if m.ListFilter != "" {
-		sb.WriteString(FilterStyle.Render(fmt.Sprintf("Filter: %s", m.ListFilter)))
-		sb.WriteString("\n")
-	}
-
-	// Column headers using padToWidth for alignment
-	header := DetailSectionStyle.Render(
-		padToWidth("#", buildW) + " " +
-			padToWidth("Type", typeW) + " " +
-			padToWidth("Branch", branchW) + " " +
-			padToWidth("Status", statusW) + " " +
-			padToWidth("Author", authorW) + " " +
-			padToWidth("Trigger", triggerW) + " " +
-			padToWidth("Created", createdW) + " " +
-			"Duration",
-	)
-	sb.WriteString(header)
+	sb.WriteString(headerLine)
 	sb.WriteString("\n")
-	sb.WriteString(DimmedStyle.Render(strings.Repeat("─", width)))
+	sb.WriteString(DividerStyle.Render(strings.Repeat("─", avail)))
 	sb.WriteString("\n")
 
-	// List items — each column padded to visual width with padToWidth
-	for i := start; i < end; i++ {
-		p := filtered[i]
-		buildNum := fmt.Sprintf("#%d", p.BuildNumber)
-		pType := truncate(pipelineTypeLabel(p.Target), typeW)
-		branch := truncate(p.Target.RefName, branchW)
-		status := renderStatusBadge(mergeStatus(p.State))
-		author := truncate(creatorName(p.Creator), authorW)
-		trigger := truncate(p.Trigger.Name, triggerW)
-		created := formatTime(p.CreatedOn)
-		duration := formatDuration(p.CreatedOn, p.CompletedOn, p.BuildSecondsUsed)
-
-		line := padToWidth(buildNum, buildW) + " " +
-			padToWidth(pType, typeW) + " " +
-			padToWidth(branch, branchW) + " " +
-			padToWidth(status, statusW) + " " +
-			padToWidth(author, authorW) + " " +
-			padToWidth(trigger, triggerW) + " " +
-			padToWidth(created, createdW) + " " +
-			duration
-
-		if i == m.ListCursor {
-			sb.WriteString(ListCursorStyle.Render(line))
-		} else {
-			sb.WriteString(ListNormalStyle.Render(line))
-		}
-		sb.WriteString("\n")
+	// Calculate viewport
+	nonItemLines := 4 // header + divider + footer filter bar + bottom spacer
+	viewportHeight := contentHeight - nonItemLines
+	if viewportHeight < 1 {
+		viewportHeight = 1
 	}
 
 	if len(filtered) == 0 {
-		sb.WriteString(DimmedStyle.Render("No pipelines found"))
+		if m.ListFilter != "" {
+			sb.WriteString(viewEmpty("No pipelines match filter: "+m.ListFilter, "esc to clear / type to refine"))
+		} else {
+			sb.WriteString(viewEmpty("No pipelines found", "Press 'r' to refresh or 'p' to switch project"))
+		}
 		sb.WriteString("\n")
-	}
+	} else {
+		// Clamp cursor and compute visible slice
+		cursor := clampCursor(m.ListCursor, len(filtered))
+		start := cursor - viewportHeight/2
+		if start < 0 {
+			start = 0
+		}
+		end := start + viewportHeight
+		if end > len(filtered) {
+			end = len(filtered)
+		}
+		if end-start < viewportHeight && start > 0 {
+			start = end - viewportHeight
+			if start < 0 {
+				start = 0
+			}
+		}
 
-	// Fill remaining lines with empty space if needed
-	if end-start < viewportHeight {
-		for i := 0; i < viewportHeight-(end-start); i++ {
+		// Build visible rows with zebra striping
+		for i := start; i < end; i++ {
+			p := filtered[i]
+			rowStyle := ListNormalStyle
+			if cursor == i {
+				rowStyle = ListCursorStyle
+			} else if i%2 == 1 {
+				rowStyle = ListAltStyle
+			}
+
+			status := resolvePipelineResult(p.State.Name, func() string {
+				if p.State.Result != nil {
+					return p.State.Result.Name
+				}
+				return ""
+			}())
+			statusBadge := statusBadgeCompact(status)
+
+			branch := truncate(p.Target.RefName, bBranchW-1)
+			typeLabel := truncate(pipelineTypeLabel(p.Target), bTypeW-1)
+			trigger := truncate(p.Trigger.Name, bTriggerW-1)
+			if trigger == "" {
+				trigger = "—"
+			}
+			dur := formatDuration(p.CreatedOn, p.CompletedOn, p.BuildSecondsUsed)
+			created := formatRelativeTime(p.CreatedOn)
+			if created == "" {
+				created = formatTime(p.CreatedOn)
+			}
+
+			// Build row with ANSI-aware padding so status colors don't misalign columns
+			row := " " + // 1-char left padding
+				padToWidth(fmt.Sprintf("#%d", p.BuildNumber), bNumW) +
+				padToWidth(statusBadge, bStatusW) +
+				padToWidth("⎇ "+branch, bBranchW) +
+				padToWidth(typeLabel, bTypeW) +
+				padToWidth(trigger, bTriggerW) +
+				padToWidth(dur, bDurW) +
+				padToWidth(created, bCreatedW)
+
+			sb.WriteString(rowStyle.Render(row))
 			sb.WriteString("\n")
 		}
 	}
 
-	// Pagination footer
-	sb.WriteString(DimmedStyle.Render(strings.Repeat("─", width)))
+	// Footer: filter bar + pagination info
 	sb.WriteString("\n")
-	pageInfo := fmt.Sprintf("Showing %d pipelines", len(filtered))
-	if m.ListScrollOff > 0 || end < len(filtered) {
-		pageInfo += fmt.Sprintf(" (%d-%d of %d)", start+1, end, len(filtered))
+	sb.WriteString(DividerStyle.Render(strings.Repeat("─", avail)))
+	sb.WriteString("\n")
+
+	filterInfo := ""
+	if m.ListFilter != "" {
+		filterInfo = FilterStyle.Render(" Filter: "+m.ListFilter+" ") + " │ "
 	}
+
+	pageInfo := fmt.Sprintf("%d pipelines", len(m.Pipelines))
 	if m.NextPageURL != "" {
-		pageInfo += " | Press 'n' for next page"
+		pageInfo += "  ┃  " + HelpKeyStyle.Render("n") + " more..."
 	}
-	sb.WriteString(DimmedStyle.Render(pageInfo))
+
+	sb.WriteString(DimmedStyle.Render(filterInfo + pageInfo))
 
 	return sb.String()
-}
-
-// mergeStatus merges the pipeline state name with result.
-func mergeStatus(state bitbucket.PipelineState) string {
-	if state.Name == "COMPLETED" && state.Result != nil {
-		return state.Result.Name
-	}
-	return state.Name
 }

@@ -59,6 +59,7 @@ type Model struct {
 	LogSearchMode bool  // true when the user is typing a search term
 	LogMatchIndex int   // current match index (-1 if no match selected)
 	LogMatchLines []int // line numbers of all matches
+	LogShowVars   bool  // show parsed variables instead of log content
 	LogState      int
 	LogError      string
 	LogScrollOff  int // scroll offset for log viewport

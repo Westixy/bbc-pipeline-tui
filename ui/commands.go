@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"net/url"
+	"strings"
+
 	"github.com/bbc/infra-pipeline-ui/bitbucket"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -63,14 +66,23 @@ func fetchPipelines(client *bitbucket.Client, workspace, repoSlug string) tea.Cm
 	}
 }
 
-// fetchNextPage loads the next page of pipelines, preserving the original sort.
-func fetchNextPage(client *bitbucket.Client, prevResult *bitbucket.PaginatedPipelines, params *bitbucket.ListPipelinesParams) tea.Cmd {
+// fetchNextPage loads the next page of pipelines using the next URL.
+func fetchNextPage(client *bitbucket.Client, nextURL string) tea.Cmd {
 	return func() tea.Msg {
-		if prevResult == nil || prevResult.Next == "" {
+		if nextURL == "" {
 			return nextPageLoadedMsg{}
 		}
-		next, err := client.ListPipelinesNext(prevResult, params)
-		if err != nil {
+		// Bitbucket next URLs may not preserve sort; explicitly add it to avoid
+		// getting the oldest pipelines on subsequent pages.
+		if !strings.Contains(nextURL, "sort=") {
+			if strings.Contains(nextURL, "?") {
+				nextURL += "&sort=" + url.QueryEscape("-created_on")
+			} else {
+				nextURL += "?sort=" + url.QueryEscape("-created_on")
+			}
+		}
+		var next bitbucket.PaginatedPipelines
+		if err := client.GetFullURL(nextURL, &next); err != nil {
 			return nextPageLoadedMsg{err: err}
 		}
 		return nextPageLoadedMsg{
