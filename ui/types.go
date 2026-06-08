@@ -46,7 +46,9 @@ type Model struct {
 	// Pipeline detail
 	SelectedPipeline *bitbucket.Pipeline
 	Steps            []bitbucket.PipelineStep
-	StepCursor       int // cursor for step selection in detail view
+	StepCursor       int    // cursor for step selection in detail view
+	DetailScrollOff  int    // scroll offset for detail/steps viewport
+	DetailMessage    string // transient message (e.g. browser URL opened)
 	ConfigVars       []bitbucket.PipelineVariable
 	ParsedLogVars    []bitbucket.PipelineVariable
 	DetailState      int
@@ -62,7 +64,8 @@ type Model struct {
 	LogShowVars   bool  // show parsed variables instead of log content
 	LogState      int
 	LogError      string
-	LogScrollOff  int // scroll offset for log viewport
+	LogScrollOff  int // vertical scroll offset for log viewport
+	LogHScroll    int // horizontal scroll offset (columns)
 
 	// Run form
 	RunBranch      textinput.Model

@@ -24,6 +24,7 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.LogMatchIndex = -1
 		m.LogMatchLines = nil
 		m.LogScrollOff = 0
+		m.LogHScroll = 0
 		m.LogState = StateReady
 		return m, nil
 
@@ -44,6 +45,36 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			maxScroll := m.maxLogScroll()
 			if m.LogScrollOff < maxScroll {
 				m.LogScrollOff++
+			}
+			return m, nil
+
+		case "left", "h":
+			if m.LogHScroll > 0 {
+				m.LogHScroll--
+			}
+			return m, nil
+
+		case "right", "l":
+			maxH := m.maxLogHScroll()
+			if m.LogHScroll < maxH {
+				m.LogHScroll++
+			}
+			return m, nil
+
+		case "pgup":
+			pageSize := m.logViewportHeight()
+			m.LogScrollOff -= pageSize
+			if m.LogScrollOff < 0 {
+				m.LogScrollOff = 0
+			}
+			return m, nil
+
+		case "pgdown":
+			pageSize := m.logViewportHeight()
+			maxScroll := m.maxLogScroll()
+			m.LogScrollOff += pageSize
+			if m.LogScrollOff > maxScroll {
+				m.LogScrollOff = maxScroll
 			}
 			return m, nil
 
@@ -171,7 +202,7 @@ func (m *Model) scrollToMatchLine(line int) {
 	}
 }
 
-// maxLogScroll returns the maximum scroll offset for the log content.
+// maxLogScroll returns the maximum vertical scroll offset for the log content.
 func (m Model) maxLogScroll() int {
 	lines := strings.Count(m.LogContent, "\n") + 1
 	maxScroll := lines - m.logViewportHeight()
@@ -179,6 +210,41 @@ func (m Model) maxLogScroll() int {
 		return 0
 	}
 	return maxScroll
+}
+
+// maxLogHScroll returns the maximum horizontal scroll offset for the current
+// viewport, based on the longest visible line.
+func (m Model) maxLogHScroll() int {
+	contentWidth := m.Width - 4 - 7 // avail minus line number prefix
+	if contentWidth < 20 {
+		return 0
+	}
+	lines := strings.Split(m.LogContent, "\n")
+	totalLines := len(lines)
+	viewportH := m.logViewportHeight()
+	start := m.LogScrollOff
+	end := start + viewportH
+	if end > totalLines {
+		end = totalLines
+	}
+	if start > end {
+		return 0
+	}
+
+	maxLen := 0
+	for i := start; i < end; i++ {
+		line := strings.TrimRight(lines[i], "\r")
+		l := lipgloss.Width(line)
+		if l > maxLen {
+			maxLen = l
+		}
+	}
+	maxScroll := maxLen - contentWidth
+	if maxScroll < 0 {
+		return 0
+	}
+	// Allow generous overscroll for CJK/narrow glyph correction
+	return maxScroll + 2
 }
 
 // logViewportHeight returns the available number of lines for log content.
@@ -296,27 +362,85 @@ func (m Model) viewLogs(contentHeight int) string {
 		}
 	}
 
+	// Content width (accounting for line number prefix)
+	contentWidth := avail - 7 // 5 for line num + 2 safety margin
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	// Clamp horizontal scroll
+	hScroll := m.LogHScroll
+	maxH := m.maxLogHScroll()
+	if hScroll > maxH {
+		hScroll = maxH
+	}
+
 	var sb strings.Builder
 	for i, line := range visible {
 		lineNum := start + i + 1
 		lineNumStr := LogLineNumStyle.Render(fmt.Sprintf("%d ", lineNum))
 
-		// Render with optional highlight
-		if hp := highlightPositions[i]; hp[0] < hp[1] {
-			before := line[:hp[0]]
-			match := line[hp[0]:hp[1]]
-			after := line[hp[1]:]
-			sb.WriteString(lineNumStr)
-			sb.WriteString(before)
-			sb.WriteString(LogHighlightStyle.Render(match))
-			sb.WriteString(strings.TrimRight(after, "\r"))
+		// Strip trailing \r for cleanliness
+		line = strings.TrimRight(line, "\r")
+
+		// Apply horizontal scroll: slice from offset
+		runes := []rune(line)
+		hOff := hScroll
+		trimmedStart := 0
+		col := 0
+		for j, r := range runes {
+			charW := 1
+			if r >= 0x4e00 && r <= 0x9fff || r >= 0x3000 && r <= 0x303f || r >= 0xff00 {
+				charW = 2
+			}
+			if col >= hOff {
+				trimmedStart = j
+				break
+			}
+			col += charW
+		}
+		displayLine := string(runes[trimmedStart:])
+
+		// Truncate to content width if still too wide
+		displayLine = truncateLogLine(displayLine, contentWidth)
+
+		// Adjust highlight positions for horizontal offset
+		hp := highlightPositions[i]
+		if hp[0] < hp[1] && hp[0] >= hOff {
+			adjStart := hp[0] - hOff
+			adjEnd := hp[1] - hOff
+			if adjEnd > len(displayLine) {
+				adjEnd = len(displayLine)
+			}
+			if adjStart < len(displayLine) && adjEnd > adjStart {
+				before := displayLine[:adjStart]
+				match := displayLine[adjStart:adjEnd]
+				after := displayLine[adjEnd:]
+				sb.WriteString(lineNumStr)
+				sb.WriteString(before)
+				sb.WriteString(LogHighlightStyle.Render(match))
+				sb.WriteString(after)
+			} else {
+				sb.WriteString(lineNumStr)
+				sb.WriteString(displayLine)
+			}
 		} else {
 			sb.WriteString(lineNumStr)
-			sb.WriteString(strings.TrimRight(line, "\r"))
+			sb.WriteString(displayLine)
 		}
 		if i < len(visible)-1 {
 			sb.WriteString("\n")
 		}
+	}
+
+	// Horizontal scroll indicator
+	hScrollInfo := ""
+	if maxH > 0 {
+		hEnd := hScroll + contentWidth
+		if hEnd > maxH+hScroll {
+			hEnd = maxH + hScroll
+		}
+		hScrollInfo = fmt.Sprintf("  col %d-%d (←→)", hScroll+1, hEnd)
 	}
 
 	// ── Rendered variables indicator ──────────────────────────────────────
@@ -331,6 +455,6 @@ func (m Model) viewLogs(contentHeight int) string {
 		DividerStyle.Render(strings.Repeat("─", avail)),
 		sb.String(),
 		DividerStyle.Render(strings.Repeat("─", avail)),
-		DimmedStyle.Render(scrollInfo+varsNote),
+		DimmedStyle.Render(scrollInfo+hScrollInfo+varsNote),
 	)
 }

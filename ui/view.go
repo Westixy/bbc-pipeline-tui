@@ -100,7 +100,7 @@ func (m Model) navKeys() []string {
 	case ScreenDetail:
 		return []string{"↑↓:steps", "enter:trigger"}
 	case ScreenLogs:
-		return []string{"↑↓:scroll", "/:search"}
+		return []string{"↑↓:scroll", "pgup/pgdn:page", "/:search"}
 	case ScreenRun:
 		return []string{"tab:next", "↑↓:vars", "enter:edit/submit"}
 	case ScreenProjects:

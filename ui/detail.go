@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/bbc/infra-pipeline-ui/bitbucket"
@@ -80,16 +82,46 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "o":
+			// Open pipeline in web browser
+			m.DetailMessage = ""
+			if m.SelectedPipeline != nil {
+				proj := m.Projects[m.ActiveProject]
+				url := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
+					proj.Workspace, proj.RepoSlug, m.SelectedPipeline.BuildNumber)
+				if err := openBrowser(url); err != nil {
+					m.DetailMessage = "URL: " + url
+				} else {
+					m.DetailMessage = "Opened: " + url
+				}
+			}
+			return m, nil
+
 		case "r":
 			m.DetailState = StateLoading
 			m.Steps = nil
 			m.StepCursor = 0
+			m.DetailMessage = ""
 			workspace := m.Projects[m.ActiveProject].Workspace
 			repoSlug := m.Projects[m.ActiveProject].RepoSlug
 			return m, tea.Batch(
 				fetchPipelineDetail(m.Client, workspace, repoSlug, m.SelectedPipeline.UUID),
 				fetchConfigVars(m.Client, workspace, repoSlug),
 			)
+
+		case "pgup":
+			m.DetailScrollOff -= 5
+			if m.DetailScrollOff < 0 {
+				m.DetailScrollOff = 0
+			}
+			return m, nil
+
+		case "pgdown":
+			m.DetailScrollOff += 5
+			if maxScroll := m.maxDetailScroll(); m.DetailScrollOff > maxScroll {
+				m.DetailScrollOff = maxScroll
+			}
+			return m, nil
 
 		case "esc":
 			m.Screen = ScreenList
@@ -168,12 +200,16 @@ func (m Model) viewDetail(contentHeight int) string {
 	)
 
 	// Steps section
-	stepsContent := buildStepsView(m.Steps, m.StepCursor)
+	stepsContent := buildStepsViewWithScroll(m.Steps, m.StepCursor, m.DetailScrollOff)
 
-	// Combine
+	// Combine sections
 	var sections []string
 	sections = append(sections, renderPage("Overview", overview, avail))
 	sections = append(sections, renderPage(fmt.Sprintf("Steps (%d)", len(m.Steps)), stepsContent, avail))
+
+	if m.DetailMessage != "" {
+		sections = append(sections, InfoStyle.Render("  "+m.DetailMessage))
+	}
 
 	if len(m.ConfigVars) > 0 {
 		varsStr := buildVarList(m.ConfigVars, avail-4)
@@ -187,19 +223,70 @@ func (m Model) viewDetail(contentHeight int) string {
 	return strings.Join(sections, "\n\n")
 }
 
-// buildStepsView renders the steps list.
+// maxDetailScroll returns the maximum scroll offset for the detail steps view.
+func (m Model) maxDetailScroll() int {
+	if len(m.Steps) <= 1 {
+		return 0
+	}
+	maxScroll := len(m.Steps) - 1
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+// buildStepsView renders the steps list (backwards-compatible stub).
 func buildStepsView(steps []bitbucket.PipelineStep, cursor int) string {
+	return buildStepsViewWithScroll(steps, cursor, 0)
+}
+
+// buildStepsViewWithScroll renders steps with scroll offset and viewport height.
+func buildStepsViewWithScroll(steps []bitbucket.PipelineStep, cursor, scrollOff int) string {
 	if len(steps) == 0 {
 		return DimmedStyle.Render("  No steps available")
 	}
 
 	cursor = clampCursor(cursor, len(steps))
 
+	// Calculate viewport
+	viewportH := 10 // default steps viewport
+	if len(steps) < viewportH {
+		viewportH = len(steps)
+	}
+
+	// Auto-center on cursor if scrollOff would hide it
+	start := scrollOff
+	end := start + viewportH
+	if end > len(steps) {
+		end = len(steps)
+	}
+	if cursor < start || cursor >= end {
+		start = cursor - viewportH/2
+		if start < 0 {
+			start = 0
+		}
+		end = start + viewportH
+		if end > len(steps) {
+			end = len(steps)
+			start = end - viewportH
+			if start < 0 {
+				start = 0
+			}
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString(ListHeaderStyle.Render(fmt.Sprintf("  %-3s %-30s %-16s %s", "#", "STEP", "STATUS", "DURATION")))
 	sb.WriteString("\n")
 
-	for i, s := range steps {
+	// Show "..." indicator if steps are hidden above
+	if start > 0 {
+		sb.WriteString(DimmedStyle.Render(fmt.Sprintf("  ... %d more steps above", start)))
+		sb.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		s := steps[i]
 		prefix := "  "
 		rowStyle := StepNormalStyle
 		if i == cursor {
@@ -219,7 +306,33 @@ func buildStepsView(steps []bitbucket.PipelineStep, cursor int) string {
 		sb.WriteString(rowStyle.Render(row))
 		sb.WriteString("\n")
 	}
+
+	// Show "..." indicator if steps are hidden below
+	if end < len(steps) {
+		sb.WriteString(DimmedStyle.Render(fmt.Sprintf("  ... %d more steps below", len(steps)-end)))
+		sb.WriteString("\n")
+	}
+
 	return sb.String()
+}
+
+// openBrowser opens the given URL in the default web browser.
+// Returns an error if no browser command is available.
+func openBrowser(url string) error {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	case "windows":
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
+	default:
+		cmd = "xdg-open"
+		args = []string{url}
+	}
+	return exec.Command(cmd, args...).Start()
 }
 
 // buildVarList formats variables as key=value pairs.

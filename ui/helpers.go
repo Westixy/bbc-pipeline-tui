@@ -59,6 +59,35 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-2] + "…"
 }
 
+// truncateLogLine truncates a log line to maxLen, appending "…" if truncated.
+// Uses rune-level truncation to handle ANSI codes and Unicode correctly.
+func truncateLogLine(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	visualLen := lipgloss.Width(s)
+	if visualLen <= maxLen {
+		return s
+	}
+	// Strip trailing \r and truncate by visual width
+	s = strings.TrimRight(s, "\r")
+	runes := []rune(s)
+	var result strings.Builder
+	used := 0
+	for _, r := range runes {
+		charW := 1
+		if r >= 0x4e00 && r <= 0x9fff || r >= 0x3000 && r <= 0x303f || r >= 0xff00 {
+			charW = 2 // CJK-like wide chars
+		}
+		if used+charW > maxLen-1 {
+			break
+		}
+		result.WriteRune(r)
+		used += charW
+	}
+	return result.String() + "…"
+}
+
 // creatorName returns the display name of the pipeline creator, or "N/A" if nil.
 func creatorName(c *bitbucket.Account) string {
 	if c == nil {

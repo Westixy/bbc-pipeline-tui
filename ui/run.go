@@ -31,7 +31,7 @@ func (m Model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Edit the selected variable inline
 				m.RunEditMode = true
 				v := m.RunVars[clampCursor(m.RunVarCursor, len(m.RunVars))]
-				m.RunEditorInput.SetValue(v.Key + "=" + v.Value)
+				m.RunEditorInput.SetValue(v.Value)
 				m.RunEditorInput.Focus()
 				return m, nil
 			}
@@ -125,16 +125,21 @@ func (m Model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) handleRunEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		// Parse key=value
 		input := m.RunEditorInput.Value()
-		idx := strings.Index(input, "=")
-		if idx >= 0 {
-			key := strings.TrimSpace(input[:idx])
-			value := strings.TrimSpace(input[idx+1:])
-			if key != "" {
-				idx := clampCursor(m.RunVarCursor, len(m.RunVars))
-				m.RunVars[idx] = bitbucket.PipelineVariable{Key: key, Value: value}
+		idx := clampCursor(m.RunVarCursor, len(m.RunVars))
+		if m.RunVars[idx].Key == "NEW_VAR" {
+			// Adding a new variable: parse key=value
+			eqIdx := strings.Index(input, "=")
+			if eqIdx >= 0 {
+				key := strings.TrimSpace(input[:eqIdx])
+				value := strings.TrimSpace(input[eqIdx+1:])
+				if key != "" {
+					m.RunVars[idx] = bitbucket.PipelineVariable{Key: key, Value: value}
+				}
 			}
+		} else {
+			// Editing existing variable: only update the value
+			m.RunVars[idx].Value = strings.TrimSpace(input)
 		}
 		m.RunEditMode = false
 		return m, nil
@@ -211,8 +216,15 @@ func (m Model) viewRun() string {
 	// ── Edit mode overlay ─────────────────────────────────────────────────
 	if m.RunEditMode {
 		m.RunEditorInput.Focus()
-		editPrompt := CardTitleStyle.Render("Edit Variable (key=value):") + "  " +
-			FocusedInputStyle.Width(50).Render(m.RunEditorInput.View())
+		idx := clampCursor(m.RunVarCursor, len(m.RunVars))
+		var editPrompt string
+		if idx < len(m.RunVars) && m.RunVars[idx].Key == "NEW_VAR" {
+			editPrompt = CardTitleStyle.Render("New Variable (key=value):") + "  " +
+				FocusedInputStyle.Width(50).Render(m.RunEditorInput.View())
+		} else {
+			editPrompt = CardTitleStyle.Render("Edit Value:") + "  " +
+				FocusedInputStyle.Width(50).Render(m.RunEditorInput.View())
+		}
 		editHint := DimmedStyle.Render("  enter to save  │  esc to cancel")
 
 		full := lipgloss.JoinVertical(lipgloss.Left,

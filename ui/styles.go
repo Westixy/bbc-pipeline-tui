@@ -227,6 +227,11 @@ var (
 			Background(surface).
 			Padding(0, 1)
 
+	// Info
+	InfoStyle = lipgloss.NewStyle().
+			Foreground(textInfo).
+			Bold(true)
+
 	// Empty state
 	EmptyStateStyle = lipgloss.NewStyle().
 			Foreground(textDimmed).
