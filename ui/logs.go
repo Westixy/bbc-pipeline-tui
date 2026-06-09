@@ -249,9 +249,10 @@ func (m Model) maxLogHScroll() int {
 
 // logViewportHeight returns the available number of lines for log content.
 func (m Model) logViewportHeight() int {
-	// Header line + search bar + scroll info + bottom padding
-	overhead := 5
-	h := m.Height - overhead
+	// contentHeight = m.Height - header(2) - help(2) - padding(3) = m.Height - 7
+	// Within that: search bar(1) + divider(1) + divider(1) + scroll info(1) = 4 overhead
+	contentHeight := m.Height - 7
+	h := contentHeight - 4
 	if h < 1 {
 		return 1
 	}
