@@ -20,12 +20,30 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.StepCursor > 0 {
 				m.StepCursor--
+				m.scrollDetailToStep()
+			} else if m.DetailScrollOff > 0 {
+				m.DetailScrollOff--
 			}
 			return m, nil
 
 		case "down", "j":
 			if m.StepCursor < len(m.Steps)-1 {
 				m.StepCursor++
+				m.scrollDetailToStep()
+			} else if m.DetailScrollOff < m.maxDetailScroll() {
+				m.DetailScrollOff++
+			}
+			return m, nil
+
+		case "home":
+			m.DetailScrollOff = 0
+			m.StepCursor = 0
+			return m, nil
+
+		case "end":
+			m.DetailScrollOff = m.maxDetailScroll()
+			if len(m.Steps) > 0 {
+				m.StepCursor = len(m.Steps) - 1
 			}
 			return m, nil
 
@@ -102,6 +120,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.DetailState = StateLoading
 			m.Steps = nil
 			m.StepCursor = 0
+			m.DetailScrollOff = 0
 			m.DetailMessage = ""
 			workspace := m.Projects[m.ActiveProject].Workspace
 			repoSlug := m.Projects[m.ActiveProject].RepoSlug
@@ -111,14 +130,22 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 
 		case "pgup":
-			m.DetailScrollOff -= 5
+			pageSize := m.detailViewportHeight()
+			if pageSize < 1 {
+				pageSize = 5
+			}
+			m.DetailScrollOff -= pageSize
 			if m.DetailScrollOff < 0 {
 				m.DetailScrollOff = 0
 			}
 			return m, nil
 
 		case "pgdown":
-			m.DetailScrollOff += 5
+			pageSize := m.detailViewportHeight()
+			if pageSize < 1 {
+				pageSize = 5
+			}
+			m.DetailScrollOff += pageSize
 			if maxScroll := m.maxDetailScroll(); m.DetailScrollOff > maxScroll {
 				m.DetailScrollOff = maxScroll
 			}
@@ -163,7 +190,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // ── Detail View ─────────────────────────────────────────────────────────────
 
-// viewDetail renders the pipeline detail screen.
+// viewDetail renders the pipeline detail screen with full-page line-based scrolling.
 func (m Model) viewDetail(contentHeight int) string {
 	if m.DetailState == StateLoading {
 		return viewLoading("Loading pipeline details")
@@ -187,10 +214,16 @@ func (m Model) viewDetail(contentHeight int) string {
 	}())
 	badge := renderStatusBadge(status)
 
+	pipelineURL := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
+		m.Projects[m.ActiveProject].Workspace,
+		m.Projects[m.ActiveProject].RepoSlug,
+		p.BuildNumber)
+
 	overview := fmt.Sprintf(
-		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
+		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
 		CardTitleStyle.Render(fmt.Sprintf("Pipeline #%d", p.BuildNumber)),
 		badge,
+		KeyStyle.Render("URL:"), ValueStyle.Render(pipelineURL),
 		KeyStyle.Render("Branch:"), ValueStyle.Render(p.Target.RefName),
 		KeyStyle.Render("Type:"), ValueStyle.Render(pipelineTypeLabel(p.Target)),
 		KeyStyle.Render("Trigger:"), ValueStyle.Render(p.Trigger.Name),
@@ -200,17 +233,148 @@ func (m Model) viewDetail(contentHeight int) string {
 		KeyStyle.Render("By:"), ValueStyle.Render(creatorName(p.Creator)),
 	)
 
-	// Steps section
-	stepsContent := buildStepsViewWithScroll(m.Steps, m.StepCursor, m.DetailScrollOff)
+	// Steps section — full, unscrolled list
+	stepsContent := buildDetailSteps(m.Steps, m.StepCursor)
 
-	// Combine sections
+	// Variables sections
+	var configVarsStr, parsedVarsStr string
+	if len(m.ConfigVars) > 0 {
+		configVarsStr = buildVarList(m.ConfigVars, avail-4)
+	}
+	if len(m.ParsedLogVars) > 0 {
+		parsedVarsStr = buildVarList(m.ParsedLogVars, avail-4)
+	}
+
+	// Build full rendered content as sections
+	overviewSection := renderPage("Overview", overview, avail)
+	stepsSection := renderPage(fmt.Sprintf("Steps (%d)", len(m.Steps)), stepsContent, avail)
+
 	var sections []string
-	sections = append(sections, renderPage("Overview", overview, avail))
-	sections = append(sections, renderPage(fmt.Sprintf("Steps (%d)", len(m.Steps)), stepsContent, avail))
+	sections = append(sections, overviewSection)
+
+	if len(configVarsStr) > 0 {
+		sections = append(sections, renderPage(fmt.Sprintf("Pipeline Variables (%d)", len(m.ConfigVars)), configVarsStr, avail))
+	}
+	if len(parsedVarsStr) > 0 {
+		sections = append(sections, renderPage(fmt.Sprintf("Parsed Log Variables (%d)", len(m.ParsedLogVars)), parsedVarsStr, avail))
+	}
+
+	sections = append(sections, stepsSection)
 
 	if m.DetailMessage != "" {
 		sections = append(sections, InfoStyle.Render("  "+m.DetailMessage))
 	}
+
+	fullContent := strings.Join(sections, "\n\n")
+
+	// Split into lines and apply scroll
+	lines := strings.Split(fullContent, "\n")
+	totalLines := len(lines)
+	viewportH := contentHeight
+	if viewportH < 1 {
+		viewportH = 1
+	}
+
+	// Clamp scroll
+	maxScroll := totalLines - viewportH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.DetailScrollOff > maxScroll {
+		m.DetailScrollOff = maxScroll
+	}
+	if m.DetailScrollOff < 0 {
+		m.DetailScrollOff = 0
+	}
+
+	start := m.DetailScrollOff
+	end := start + viewportH
+	if end > totalLines {
+		end = totalLines
+	}
+
+	visibleLines := lines[start:end]
+
+	// Pad to viewport height
+	for len(visibleLines) < viewportH {
+		visibleLines = append(visibleLines, "")
+	}
+
+	result := strings.Join(visibleLines, "\n")
+
+	// Scroll indicator
+	if maxScroll > 0 {
+		scrollPct := m.DetailScrollOff * 100 / maxScroll
+		result += "\n" + DimmedStyle.Render(
+			fmt.Sprintf("  Lines %d-%d/%d (%d%%)  pgup/pgdn:page  ↑↓:steps/scroll  home/end",
+				start+1, end, totalLines, scrollPct))
+	}
+
+	return result
+}
+
+// maxDetailScroll returns the maximum scroll offset for the detail view.
+func (m Model) maxDetailScroll() int {
+	// Build full content to count lines
+	fullContent := m.buildDetailFullContent()
+	lines := strings.Count(fullContent, "\n") + 1
+	viewportH := m.detailViewportHeight()
+	maxScroll := lines - viewportH
+	if maxScroll < 0 {
+		return 0
+	}
+	return maxScroll
+}
+
+// detailViewportHeight returns the available lines for the detail viewport.
+func (m Model) detailViewportHeight() int {
+	// contentHeight = m.Height - headerLines(2) - helpLines(2) - 3 (viewContent padding)
+	h := m.Height - 7
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
+// buildDetailFullContent returns the full unscrolled content as a string (for line counting).
+func (m Model) buildDetailFullContent() string {
+	if m.SelectedPipeline == nil {
+		return ""
+	}
+	p := m.SelectedPipeline
+	avail := m.Width - 4
+
+	status := resolvePipelineResult(p.State.Name, func() string {
+		if p.State.Result != nil {
+			return p.State.Result.Name
+		}
+		return ""
+	}())
+	badge := renderStatusBadge(status)
+
+	pipelineURL := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
+		m.Projects[m.ActiveProject].Workspace,
+		m.Projects[m.ActiveProject].RepoSlug,
+		p.BuildNumber)
+
+	overview := fmt.Sprintf(
+		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
+		CardTitleStyle.Render(fmt.Sprintf("Pipeline #%d", p.BuildNumber)),
+		badge,
+		KeyStyle.Render("URL:"), ValueStyle.Render(pipelineURL),
+		KeyStyle.Render("Branch:"), ValueStyle.Render(p.Target.RefName),
+		KeyStyle.Render("Type:"), ValueStyle.Render(pipelineTypeLabel(p.Target)),
+		KeyStyle.Render("Trigger:"), ValueStyle.Render(p.Trigger.Name),
+		KeyStyle.Render("Duration:"), ValueStyle.Render(formatDuration(p.CreatedOn, p.CompletedOn, p.BuildSecondsUsed)),
+		KeyStyle.Render("Created:"), ValueStyle.Render(formatTime(p.CreatedOn)),
+		KeyStyle.Render("Completed:"), ValueStyle.Render(formatTime(p.CompletedOn)),
+		KeyStyle.Render("By:"), ValueStyle.Render(creatorName(p.Creator)),
+	)
+
+	stepsContent := buildDetailSteps(m.Steps, m.StepCursor)
+
+	var sections []string
+	sections = append(sections, renderPage("Overview", overview, avail))
 
 	if len(m.ConfigVars) > 0 {
 		varsStr := buildVarList(m.ConfigVars, avail-4)
@@ -221,73 +385,67 @@ func (m Model) viewDetail(contentHeight int) string {
 		sections = append(sections, renderPage(fmt.Sprintf("Parsed Log Variables (%d)", len(m.ParsedLogVars)), varsStr, avail))
 	}
 
+	sections = append(sections, renderPage(fmt.Sprintf("Steps (%d)", len(m.Steps)), stepsContent, avail))
+
+	if m.DetailMessage != "" {
+		sections = append(sections, InfoStyle.Render("  "+m.DetailMessage))
+	}
+
 	return strings.Join(sections, "\n\n")
 }
 
-// maxDetailScroll returns the maximum scroll offset for the detail steps view.
-func (m Model) maxDetailScroll() int {
-	if len(m.Steps) <= 1 {
-		return 0
+// scrollDetailToStep ensures the currently selected step is visible in the viewport.
+func (m *Model) scrollDetailToStep() {
+	if len(m.Steps) == 0 {
+		return
 	}
-	maxScroll := len(m.Steps) - 1
-	if maxScroll < 0 {
-		return 0
+	fullContent := m.buildDetailFullContent()
+	lines := strings.Split(fullContent, "\n")
+
+	// Find the line of the current step cursor
+	// First, find the Steps section header
+	var stepsHeaderLine int = -1
+	for i, line := range lines {
+		if strings.Contains(line, fmt.Sprintf("Steps (%d)", len(m.Steps))) {
+			stepsHeaderLine = i
+			break
+		}
 	}
-	return maxScroll
+	if stepsHeaderLine < 0 {
+		return
+	}
+	// After the header, there's a blank line, then the step list
+	// The step list starts at stepsHeaderLine + 2 (header + blank)
+	targetLine := stepsHeaderLine + 2 + m.StepCursor
+
+	viewportH := m.detailViewportHeight()
+	if viewportH < 1 {
+		return
+	}
+
+	if targetLine >= m.DetailScrollOff && targetLine < m.DetailScrollOff+viewportH {
+		return // already visible
+	}
+	// Center on the target
+	m.DetailScrollOff = targetLine - viewportH/2
+	if m.DetailScrollOff < 0 {
+		m.DetailScrollOff = 0
+	}
 }
 
-// buildStepsView renders the steps list (backwards-compatible stub).
-func buildStepsView(steps []bitbucket.PipelineStep, cursor int) string {
-	return buildStepsViewWithScroll(steps, cursor, 0)
-}
-
-// buildStepsViewWithScroll renders steps with scroll offset and viewport height.
-func buildStepsViewWithScroll(steps []bitbucket.PipelineStep, cursor, scrollOff int) string {
+// buildDetailSteps renders the full steps list (no viewport clipping).
+func buildDetailSteps(steps []bitbucket.PipelineStep, cursor int) string {
 	if len(steps) == 0 {
 		return DimmedStyle.Render("  No steps available")
 	}
 
 	cursor = clampCursor(cursor, len(steps))
 
-	// Calculate viewport
-	viewportH := 10 // default steps viewport
-	if len(steps) < viewportH {
-		viewportH = len(steps)
-	}
-
-	// Auto-center on cursor if scrollOff would hide it
-	start := scrollOff
-	end := start + viewportH
-	if end > len(steps) {
-		end = len(steps)
-	}
-	if cursor < start || cursor >= end {
-		start = cursor - viewportH/2
-		if start < 0 {
-			start = 0
-		}
-		end = start + viewportH
-		if end > len(steps) {
-			end = len(steps)
-			start = end - viewportH
-			if start < 0 {
-				start = 0
-			}
-		}
-	}
-
 	var sb strings.Builder
 	sb.WriteString(ListHeaderStyle.Render(fmt.Sprintf("  %-3s %-30s %-16s %s", "#", "STEP", "STATUS", "DURATION")))
 	sb.WriteString("\n")
 
-	// Show "..." indicator if steps are hidden above
-	if start > 0 {
-		sb.WriteString(DimmedStyle.Render(fmt.Sprintf("  ... %d more steps above", start)))
-		sb.WriteString("\n")
-	}
-
-	for i := start; i < end; i++ {
-		s := steps[i]
+	for i, s := range steps {
 		prefix := "  "
 		rowStyle := StepNormalStyle
 		if i == cursor {
@@ -305,12 +463,6 @@ func buildStepsViewWithScroll(steps []bitbucket.PipelineStep, cursor, scrollOff 
 			dur,
 		)
 		sb.WriteString(rowStyle.Render(row))
-		sb.WriteString("\n")
-	}
-
-	// Show "..." indicator if steps are hidden below
-	if end < len(steps) {
-		sb.WriteString(DimmedStyle.Render(fmt.Sprintf("  ... %d more steps below", len(steps)-end)))
 		sb.WriteString("\n")
 	}
 

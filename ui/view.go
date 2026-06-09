@@ -100,7 +100,7 @@ func (m Model) navKeys() []string {
 	case ScreenList:
 		return []string{"↑↓:move", "/:filter", "enter:detail", "n:next page"}
 	case ScreenDetail:
-		return []string{"↑↓:steps", "enter:trigger"}
+		return []string{"↑↓:steps/scroll", "pgup/pgdn:page", "home/end"}
 	case ScreenLogs:
 		return []string{"↑↓:scroll", "pgup/pgdn:page", "/:search"}
 	case ScreenRun:
@@ -118,9 +118,9 @@ func (m Model) navKeys() []string {
 func (m Model) actionKeys() []string {
 	switch m.Screen {
 	case ScreenList:
-		return []string{"r:refresh", "p:projects"}
+		return []string{"o:open", "r:refresh", "p:projects"}
 	case ScreenDetail:
-		return []string{"l:logs", "r:refresh"}
+		return []string{"enter:trigger", "l:logs", "o:open", "r:refresh"}
 	case ScreenLogs:
 		return []string{"v:parse vars", "esc:back"}
 	case ScreenRun:

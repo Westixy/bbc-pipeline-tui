@@ -185,6 +185,16 @@ func (m Model) updateList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			repoSlug := m.Projects[m.ActiveProject].RepoSlug
 			cmd = fetchPipelines(m.Client, workspace, repoSlug)
 
+		case "o":
+			// Open pipeline in web browser from list
+			if m.ListCursor >= 0 && m.ListCursor < len(m.Pipelines) {
+				proj := m.Projects[m.ActiveProject]
+				p := m.Pipelines[m.ListCursor]
+				url := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
+					proj.Workspace, proj.RepoSlug, p.BuildNumber)
+				_ = openBrowser(url)
+			}
+
 		case "p":
 			m.Screen = ScreenProjects
 
