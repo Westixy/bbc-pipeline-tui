@@ -35,34 +35,26 @@ func (m Model) View() string {
 	)
 }
 
-// viewHeader renders the top bar with title and tabs.
+// viewHeader renders the top bar with current project and relevant URL.
 func (m Model) viewHeader() string {
 	title := "⚡ " + TitleStyle.Render("Pipeline TUI")
 
-	var tabs []string
-	for i, p := range m.Projects {
-		label := fmt.Sprintf(" %d:%s/%s ", i+1, p.Workspace, p.RepoSlug)
-		if i == m.ActiveProject {
-			tabs = append(tabs, ActiveTabStyle.Render(label))
-		} else {
-			tabs = append(tabs, TabStyle.Render(label))
-		}
+	proj := m.Projects[m.ActiveProject]
+	projectLabel := ActiveTabStyle.Render(fmt.Sprintf(" %s/%s ", proj.Workspace, proj.RepoSlug))
+
+	var urlStr string
+	if m.Screen == ScreenDetail && m.SelectedPipeline != nil {
+		urlStr = fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
+			proj.Workspace, proj.RepoSlug, m.SelectedPipeline.BuildNumber)
+	} else {
+		urlStr = fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines",
+			proj.Workspace, proj.RepoSlug)
 	}
-	tabsStr := strings.Join(tabs, "")
+	urlLabel := DimmedStyle.Render(" · " + urlStr)
 
-	screenTitle := DimmedStyle.Render(" · " + m.ScreenTitle())
+	left := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", projectLabel, urlLabel)
 
-	left := lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", tabsStr)
-	right := screenTitle
-
-	// Fill the middle with space so right aligns
-	used := lipgloss.Width(left) + lipgloss.Width(right)
-	filler := ""
-	if m.Width > used {
-		filler = strings.Repeat(" ", m.Width-used)
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, filler, right)
+	return left
 }
 
 // viewContent routes to the appropriate screen view, passing available height.

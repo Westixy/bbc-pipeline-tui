@@ -214,16 +214,10 @@ func (m Model) viewDetail(contentHeight int) string {
 	}())
 	badge := renderStatusBadge(status)
 
-	pipelineURL := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
-		m.Projects[m.ActiveProject].Workspace,
-		m.Projects[m.ActiveProject].RepoSlug,
-		p.BuildNumber)
-
 	overview := fmt.Sprintf(
-		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
+		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
 		CardTitleStyle.Render(fmt.Sprintf("Pipeline #%d", p.BuildNumber)),
 		badge,
-		KeyStyle.Render("URL:"), ValueStyle.Render(pipelineURL),
 		KeyStyle.Render("Branch:"), ValueStyle.Render(p.Target.RefName),
 		KeyStyle.Render("Type:"), ValueStyle.Render(pipelineTypeLabel(p.Target)),
 		KeyStyle.Render("Trigger:"), ValueStyle.Render(p.Trigger.Name),
@@ -352,16 +346,10 @@ func (m Model) buildDetailFullContent() string {
 	}())
 	badge := renderStatusBadge(status)
 
-	pipelineURL := fmt.Sprintf("https://bitbucket.org/%s/%s/pipelines/results/%d",
-		m.Projects[m.ActiveProject].Workspace,
-		m.Projects[m.ActiveProject].RepoSlug,
-		p.BuildNumber)
-
 	overview := fmt.Sprintf(
-		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
+		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
 		CardTitleStyle.Render(fmt.Sprintf("Pipeline #%d", p.BuildNumber)),
 		badge,
-		KeyStyle.Render("URL:"), ValueStyle.Render(pipelineURL),
 		KeyStyle.Render("Branch:"), ValueStyle.Render(p.Target.RefName),
 		KeyStyle.Render("Type:"), ValueStyle.Render(pipelineTypeLabel(p.Target)),
 		KeyStyle.Render("Trigger:"), ValueStyle.Render(p.Trigger.Name),
