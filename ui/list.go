@@ -560,7 +560,7 @@ func buildPreviewSteps(steps []bitbucket.PipelineStep, scrollOff, maxVisible, wi
 
 	var sb strings.Builder
 
-	statusW := 8
+	statusW := 12
 	nameW := width - statusW - 6
 	if nameW < 8 {
 		nameW = 8
