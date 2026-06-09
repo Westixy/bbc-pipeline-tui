@@ -130,6 +130,12 @@ var (
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderForeground(border)
 
+	PreviewTitleStyle = lipgloss.NewStyle().
+				Foreground(accentCyan).
+				Background(surface).
+				Bold(true).
+				Padding(0, 1)
+
 	CardStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(border).

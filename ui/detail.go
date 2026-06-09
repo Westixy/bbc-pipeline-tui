@@ -98,6 +98,7 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "r":
+			m.Client.InvalidateCacheForRepo(m.Projects[m.ActiveProject].Workspace, m.Projects[m.ActiveProject].RepoSlug)
 			m.DetailState = StateLoading
 			m.Steps = nil
 			m.StepCursor = 0

@@ -48,8 +48,15 @@ type logVarsLoadedMsg struct {
 	err       error
 }
 
+type pipelinePreviewLoadedMsg struct {
+	pipeline  *bitbucket.Pipeline
+	steps     []bitbucket.PipelineStep
+	variables []bitbucket.PipelineVariable
+	err       error
+}
+
 // fetchPipelines loads the first page of pipelines for the active project.
-func fetchPipelines(client *bitbucket.Client, workspace, repoSlug string) tea.Cmd {
+func fetchPipelines(client *bitbucket.CachedClient, workspace, repoSlug string) tea.Cmd {
 	return func() tea.Msg {
 		params := &bitbucket.ListPipelinesParams{
 			Pagelen: 25,
@@ -67,7 +74,7 @@ func fetchPipelines(client *bitbucket.Client, workspace, repoSlug string) tea.Cm
 }
 
 // fetchNextPage loads the next page of pipelines using the next URL.
-func fetchNextPage(client *bitbucket.Client, nextURL string) tea.Cmd {
+func fetchNextPage(client *bitbucket.CachedClient, nextURL string) tea.Cmd {
 	return func() tea.Msg {
 		if nextURL == "" {
 			return nextPageLoadedMsg{}
@@ -93,7 +100,7 @@ func fetchNextPage(client *bitbucket.Client, nextURL string) tea.Cmd {
 }
 
 // fetchPipelineDetail loads a single pipeline and its steps.
-func fetchPipelineDetail(client *bitbucket.Client, workspace, repoSlug, pipelineUUID string) tea.Cmd {
+func fetchPipelineDetail(client *bitbucket.CachedClient, workspace, repoSlug, pipelineUUID string) tea.Cmd {
 	return func() tea.Msg {
 		pipeline, err := client.GetPipeline(workspace, repoSlug, pipelineUUID)
 		if err != nil {
@@ -111,7 +118,7 @@ func fetchPipelineDetail(client *bitbucket.Client, workspace, repoSlug, pipeline
 }
 
 // fetchStepLog loads the log for a specific step.
-func fetchStepLog(client *bitbucket.Client, workspace, repoSlug, pipelineUUID, stepUUID, stepName string) tea.Cmd {
+func fetchStepLog(client *bitbucket.CachedClient, workspace, repoSlug, pipelineUUID, stepUUID, stepName string) tea.Cmd {
 	return func() tea.Msg {
 		content, err := client.GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID)
 		if err != nil {
@@ -125,7 +132,7 @@ func fetchStepLog(client *bitbucket.Client, workspace, repoSlug, pipelineUUID, s
 }
 
 // triggerPipelineCmd triggers a new pipeline run.
-func triggerPipelineCmd(client *bitbucket.Client, workspace, repoSlug string, req bitbucket.TriggerPipelineRequest) tea.Cmd {
+func triggerPipelineCmd(client *bitbucket.CachedClient, workspace, repoSlug string, req bitbucket.TriggerPipelineRequest) tea.Cmd {
 	return func() tea.Msg {
 		pipeline, err := client.TriggerPipeline(workspace, repoSlug, req)
 		if err != nil {
@@ -136,7 +143,7 @@ func triggerPipelineCmd(client *bitbucket.Client, workspace, repoSlug string, re
 }
 
 // fetchConfigVars loads repository-level pipeline config variables.
-func fetchConfigVars(client *bitbucket.Client, workspace, repoSlug string) tea.Cmd {
+func fetchConfigVars(client *bitbucket.CachedClient, workspace, repoSlug string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := client.ListPipelineVariables(workspace, repoSlug)
 		if err != nil {
@@ -149,7 +156,7 @@ func fetchConfigVars(client *bitbucket.Client, workspace, repoSlug string) tea.C
 // fetchLogVarsForPipeline fetches the first step's log and parses pipeline variables from it.
 // This is used on the detail screen to get actual pipeline variables from the run log,
 // since the API may not return them for custom pipelines.
-func fetchLogVarsForPipeline(client *bitbucket.Client, workspace, repoSlug, pipelineUUID string) tea.Cmd {
+func fetchLogVarsForPipeline(client *bitbucket.CachedClient, workspace, repoSlug, pipelineUUID string) tea.Cmd {
 	return func() tea.Msg {
 		stepsResult, err := client.ListPipelineSteps(workspace, repoSlug, pipelineUUID)
 		if err != nil || len(stepsResult.Values) == 0 {
@@ -165,5 +172,34 @@ func fetchLogVarsForPipeline(client *bitbucket.Client, workspace, repoSlug, pipe
 		}
 		vars := ParsePipelineVariablesFromLog(content)
 		return logVarsLoadedMsg{variables: vars}
+	}
+}
+
+// fetchPipelinePreview loads a pipeline's detail, steps, and config vars for the
+// split-panel preview on the list screen.
+func fetchPipelinePreview(client *bitbucket.CachedClient, workspace, repoSlug, pipelineUUID string) tea.Cmd {
+	return func() tea.Msg {
+		pipeline, pErr := client.GetPipeline(workspace, repoSlug, pipelineUUID)
+		if pErr != nil {
+			return pipelinePreviewLoadedMsg{err: pErr}
+		}
+		stepsResult, sErr := client.ListPipelineSteps(workspace, repoSlug, pipelineUUID)
+		var steps []bitbucket.PipelineStep
+		if sErr == nil {
+			steps = stepsResult.Values
+		}
+		// Parse pipeline variables from the first step's build log
+		var vars []bitbucket.PipelineVariable
+		if len(steps) > 0 {
+			content, logErr := client.GetStepLog(workspace, repoSlug, pipelineUUID, steps[0].UUID)
+			if logErr == nil {
+				vars = ParsePipelineVariablesFromLog(content)
+			}
+		}
+		return pipelinePreviewLoadedMsg{
+			pipeline:  pipeline,
+			steps:     steps,
+			variables: vars,
+		}
 	}
 }

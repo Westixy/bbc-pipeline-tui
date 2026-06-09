@@ -8,7 +8,7 @@ import (
 )
 
 // NewModel creates a new Model with the given config and client.
-func NewModel(cfg *config.Config, client *bitbucket.Client) Model {
+func NewModel(cfg *config.Config, client *bitbucket.CachedClient) Model {
 	runBranch := textinput.New()
 	runBranch.Placeholder = "main"
 	runBranch.CharLimit = 200

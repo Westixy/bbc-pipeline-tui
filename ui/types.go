@@ -28,7 +28,7 @@ const (
 type Model struct {
 	// Config & client
 	Config   *config.Config
-	Client   *bitbucket.Client
+	Client   *bitbucket.CachedClient
 	Projects []config.Project
 
 	// Current project tab
@@ -53,6 +53,17 @@ type Model struct {
 	ParsedLogVars    []bitbucket.PipelineVariable
 	DetailState      int
 	DetailError      string
+
+	// Pipeline preview (split panel with list)
+	PreviewPipeline    *bitbucket.Pipeline
+	PreviewSteps       []bitbucket.PipelineStep
+	PreviewConfigVars  []bitbucket.PipelineVariable
+	PreviewUUID        string
+	PreviewState       int
+	PreviewError       string
+	PreviewScrollOff   int
+	FocusPanel         int // 0 = list, 1 = preview
+	SplitLeftWidth     int
 
 	// Logs
 	LogContent    string

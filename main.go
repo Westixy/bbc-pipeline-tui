@@ -36,11 +36,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create client
+	// Create client with cache
 	client := bitbucket.NewClient(cfg.Username, cfg.AppPass)
+	cachedClient := bitbucket.NewCachedClient(client)
 
 	// Create and run model
-	model := ui.NewModel(cfg, client)
+	model := ui.NewModel(cfg, cachedClient)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
