@@ -49,14 +49,16 @@ func filteredPipelines(pipelines []bitbucket.Pipeline, filter string) []bitbucke
 }
 
 // truncate truncates a string to maxLen, appending "…" if truncated.
+// Uses rune-level slicing to safely handle multi-byte UTF-8 characters.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	if maxLen < 1 {
-		return ""
+	if maxLen < 3 {
+		return strings.Repeat("…", maxLen)
 	}
-	return s[:maxLen-2] + "…"
+	return string(runes[:maxLen-1]) + "…"
 }
 
 // truncateStyled truncates a styled string to fit maxLen using visual width.

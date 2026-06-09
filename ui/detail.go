@@ -202,68 +202,14 @@ func (m Model) viewDetail(contentHeight int) string {
 		return viewEmpty("No pipeline selected", "Return to list and press enter on a pipeline")
 	}
 
-	p := m.SelectedPipeline
-	avail := m.Width - 4
-
-	// Overview card
-	status := resolvePipelineResult(p.State.Name, func() string {
-		if p.State.Result != nil {
-			return p.State.Result.Name
-		}
-		return ""
-	}())
-	badge := renderStatusBadge(status)
-
-	overview := fmt.Sprintf(
-		"%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s",
-		CardTitleStyle.Render(fmt.Sprintf("Pipeline #%d", p.BuildNumber)),
-		badge,
-		KeyStyle.Render("Branch:"), ValueStyle.Render(p.Target.RefName),
-		KeyStyle.Render("Type:"), ValueStyle.Render(pipelineTypeLabel(p.Target)),
-		KeyStyle.Render("Trigger:"), ValueStyle.Render(p.Trigger.Name),
-		KeyStyle.Render("Duration:"), ValueStyle.Render(formatDuration(p.CreatedOn, p.CompletedOn, p.BuildSecondsUsed)),
-		KeyStyle.Render("Created:"), ValueStyle.Render(formatTime(p.CreatedOn)),
-		KeyStyle.Render("Completed:"), ValueStyle.Render(formatTime(p.CompletedOn)),
-		KeyStyle.Render("By:"), ValueStyle.Render(creatorName(p.Creator)),
-	)
-
-	// Steps section — full, unscrolled list
-	stepsContent := buildDetailSteps(m.Steps, m.StepCursor)
-
-	// Variables sections
-	var configVarsStr, parsedVarsStr string
-	if len(m.ConfigVars) > 0 {
-		configVarsStr = buildVarList(m.ConfigVars, avail-4)
-	}
-	if len(m.ParsedLogVars) > 0 {
-		parsedVarsStr = buildVarList(m.ParsedLogVars, avail-4)
-	}
-
-	// Build full rendered content as sections
-	overviewSection := renderPage("Overview", overview, avail)
-	stepsSection := renderPage(fmt.Sprintf("Steps (%d)", len(m.Steps)), stepsContent, avail)
-
-	var sections []string
-	sections = append(sections, overviewSection)
-
-	if len(configVarsStr) > 0 {
-		sections = append(sections, renderPage(fmt.Sprintf("Pipeline Variables (%d)", len(m.ConfigVars)), configVarsStr, avail))
-	}
-	if len(parsedVarsStr) > 0 {
-		sections = append(sections, renderPage(fmt.Sprintf("Parsed Log Variables (%d)", len(m.ParsedLogVars)), parsedVarsStr, avail))
-	}
-
-	sections = append(sections, stepsSection)
-
-	if m.DetailMessage != "" {
-		sections = append(sections, InfoStyle.Render("  "+m.DetailMessage))
-	}
-
-	fullContent := strings.Join(sections, "\n\n")
+	fullContent := m.buildDetailFullContent()
 
 	// Split into lines and apply scroll
 	lines := strings.Split(fullContent, "\n")
 	totalLines := len(lines)
+
+	// Cache total line count so maxDetailScroll doesn't need to rebuild.
+	m.DetailTotalLines = totalLines
 	viewportH := contentHeight
 	if viewportH < 1 {
 		viewportH = 1
@@ -309,11 +255,9 @@ func (m Model) viewDetail(contentHeight int) string {
 
 // maxDetailScroll returns the maximum scroll offset for the detail view.
 func (m Model) maxDetailScroll() int {
-	// Build full content to count lines
-	fullContent := m.buildDetailFullContent()
-	lines := strings.Count(fullContent, "\n") + 1
+	// Use cached total line count (set during viewDetail).
 	viewportH := m.detailViewportHeight()
-	maxScroll := lines - viewportH
+	maxScroll := m.DetailTotalLines - viewportH
 	if maxScroll < 0 {
 		return 0
 	}

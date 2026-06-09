@@ -5,28 +5,28 @@ import "github.com/charmbracelet/lipgloss"
 // ── Color palette (dark theme, accessible) ──────────────────────────────────
 var (
 	bg            = lipgloss.Color("#0f0f1a")
-	bgSecondary   = lipgloss.Color("#16162a")
+	bgSecondary   = lipgloss.Color("#222240")
 	surface       = lipgloss.Color("#1e1e3a")
 	surfaceAlt    = lipgloss.Color("#262648")
 	border        = lipgloss.Color("#3a3a5c")
-	borderFocus   = lipgloss.Color("#6c5ce7")
+	borderFocus   = lipgloss.Color("#9d8fff")
 	accentGold    = lipgloss.Color("#ffd700")
 	accentCyan    = lipgloss.Color("#00cec9")
 	textPrimary   = lipgloss.Color("#e0e0e0")
 	textSecondary = lipgloss.Color("#9090a0")
-	textDimmed    = lipgloss.Color("#5a5a70")
+	textDimmed    = lipgloss.Color("#a8a8b8")
 	textError     = lipgloss.Color("#ff6b6b")
 	textSuccess   = lipgloss.Color("#00d2a0")
 	textWarning   = lipgloss.Color("#feca57")
 	textInfo      = lipgloss.Color("#74b9ff")
-	textMuted     = lipgloss.Color("#6c6c84")
+	textMuted     = lipgloss.Color("#9e9eae")
 
 	// Status pill backgrounds
 	pillInProgress = lipgloss.Color("#1a3a5c")
 	pillPending    = lipgloss.Color("#3a3a1a")
 	pillSuccess    = lipgloss.Color("#1a3a2a")
 	pillFailed     = lipgloss.Color("#3a1a1a")
-	pillStopped    = lipgloss.Color("#2a2a3a")
+	pillStopped    = lipgloss.Color("#4a4a60")
 )
 
 // ── Base ────────────────────────────────────────────────────────────────────

@@ -7,6 +7,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// contentLayoutOverhead accounts for internal padding and spacing consumed by
+// individual screen views (CardStyle borders, section gaps, etc.).
+const contentLayoutOverhead = 3
+
 // View renders the full TUI based on the current screen, filling the terminal.
 func (m Model) View() string {
 	if !m.Ready {
@@ -24,7 +28,7 @@ func (m Model) View() string {
 	}
 
 	header := m.viewHeader()
-	content := m.viewContent(contentHeight - 3)
+	content := m.viewContent(contentHeight - contentLayoutOverhead)
 	help := m.viewHelp()
 
 	// Don't force Height on ContentStyle; let it flow naturally within viewContent

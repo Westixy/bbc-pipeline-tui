@@ -199,14 +199,19 @@ func (m Model) viewRun() string {
 	branchLabel := RequiredMarkerStyle.Render("*") + " Branch"
 	selLabel := "  Selector"
 
+	inputWidth := avail - 18
+	if inputWidth < 20 {
+		inputWidth = 20
+	}
+
 	branchInput := lipgloss.JoinHorizontal(lipgloss.Top,
 		KeyStyle.Render(branchLabel+" "),
-		branchStyle.Width(40).Render(m.RunBranch.View()),
+		branchStyle.Width(inputWidth).Render(m.RunBranch.View()),
 	)
 
 	selInput := lipgloss.JoinHorizontal(lipgloss.Top,
 		KeyStyle.Render(selLabel+" "),
-		selStyle.Width(40).Render(m.RunSelector.View()),
+		selStyle.Width(inputWidth).Render(m.RunSelector.View()),
 	)
 
 	// ── Variables Section ─────────────────────────────────────────────────
@@ -282,11 +287,8 @@ func (m Model) buildRunVariablesSection() string {
 			style = StepCursorStyle
 		}
 
-		// Truncate long values
-		val := v.Value
-		if len(val) > 50 {
-			val = val[:47] + "…"
-		}
+		// Truncate long values safely (handles multi-byte UTF-8)
+		val := truncate(v.Value, 48)
 
 		line := fmt.Sprintf("%s%s %s", prefix,
 			KeyStyle.Render(v.Key+":"),

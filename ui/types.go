@@ -45,15 +45,16 @@ type Model struct {
 	ListScrollOff int // scroll offset for list viewport
 
 	// Pipeline detail
-	SelectedPipeline *bitbucket.Pipeline
-	Steps            []bitbucket.PipelineStep
-	StepCursor       int    // cursor for step selection in detail view
-	DetailScrollOff  int    // scroll offset for detail/steps viewport
-	DetailMessage    string // transient message (e.g. browser URL opened)
-	ConfigVars       []bitbucket.PipelineVariable
-	ParsedLogVars    []bitbucket.PipelineVariable
-	DetailState      int
-	DetailError      string
+	SelectedPipeline   *bitbucket.Pipeline
+	Steps              []bitbucket.PipelineStep
+	StepCursor         int    // cursor for step selection in detail view
+	DetailScrollOff    int    // scroll offset for detail/steps viewport
+	DetailMessage      string // transient message (e.g. browser URL opened)
+	DetailTotalLines   int    // cached total line count (set during viewDetail)
+	ConfigVars         []bitbucket.PipelineVariable
+	ParsedLogVars      []bitbucket.PipelineVariable
+	DetailState        int
+	DetailError        string
 
 	// Pipeline preview (split panel with list)
 	PreviewPipeline    *bitbucket.Pipeline
