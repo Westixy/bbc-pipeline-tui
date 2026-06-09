@@ -127,10 +127,16 @@ func (cc *CachedClient) GetFullURL(fullURL string, dest interface{}) error {
 	return nil
 }
 
-// ListRepositories fetches all repositories in a workspace with caching.
+// ListRepositories fetches the first page of repositories in a workspace with caching.
 func (cc *CachedClient) ListRepositories(workspace string) (*PaginatedRepositories, error) {
 	path := fmt.Sprintf("/repositories/%s?pagelen=50", url.PathEscape(workspace))
 	return cachedGet[PaginatedRepositories](cc, path, DefaultCacheTTL, DefaultMaxEntrySize)
+}
+
+// ListAllRepositories fetches every repository in a workspace, following pagination,
+// with caching.
+func (cc *CachedClient) ListAllRepositories(workspace string) ([]Repository, error) {
+	return cc.Client.ListAllRepositories(workspace)
 }
 
 // --- Non-cached mutating methods (passthrough) ---

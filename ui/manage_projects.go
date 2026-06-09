@@ -463,10 +463,10 @@ type workspaceReposMsg struct {
 
 func fetchWorkspaceRepos(client *bitbucket.CachedClient, workspace string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := client.ListRepositories(workspace)
+		repos, err := client.ListAllRepositories(workspace)
 		if err != nil {
 			return workspaceReposMsg{err: err}
 		}
-		return workspaceReposMsg{repos: result.Values}
+		return workspaceReposMsg{repos: repos}
 	}
 }
