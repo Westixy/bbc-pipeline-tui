@@ -59,6 +59,28 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-2] + "…"
 }
 
+// truncateStyled truncates a styled string to fit maxLen using visual width.
+func truncateStyled(s string, maxLen int) string {
+	if maxLen < 1 {
+		return ""
+	}
+	visualLen := lipgloss.Width(s)
+	if visualLen <= maxLen {
+		return s
+	}
+	runes := []rune(s)
+	var result strings.Builder
+	used := 0
+	for _, r := range runes {
+		if used >= maxLen {
+			break
+		}
+		result.WriteRune(r)
+		used++
+	}
+	return result.String()
+}
+
 // truncateLogLine truncates a log line to maxLen, appending "…" if truncated.
 // Uses rune-level truncation to handle ANSI codes and Unicode correctly.
 func truncateLogLine(s string, maxLen int) string {

@@ -87,6 +87,38 @@ func (c *Config) SaveTo(path string) error {
 	return nil
 }
 
+// AddProject appends a workspace/repo_slug pair if not already present.
+// Returns true if the project was added.
+func (c *Config) AddProject(workspace, repoSlug string) bool {
+	if c.HasProject(workspace, repoSlug) {
+		return false
+	}
+	c.Projects = append(c.Projects, Project{Workspace: workspace, RepoSlug: repoSlug})
+	return true
+}
+
+// RemoveProject removes a workspace/repo_slug pair by matching both fields.
+// Returns true if a project was removed.
+func (c *Config) RemoveProject(workspace, repoSlug string) bool {
+	for i, p := range c.Projects {
+		if p.Workspace == workspace && p.RepoSlug == repoSlug {
+			c.Projects = append(c.Projects[:i], c.Projects[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// HasProject checks if a workspace/repo_slug pair exists in the config.
+func (c *Config) HasProject(workspace, repoSlug string) bool {
+	for _, p := range c.Projects {
+		if p.Workspace == workspace && p.RepoSlug == repoSlug {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks that the config has the required fields.
 func (c *Config) Validate() error {
 	if c.Username == "" {

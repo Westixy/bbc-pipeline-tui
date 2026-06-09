@@ -78,6 +78,8 @@ func (m Model) viewContent(contentHeight int) string {
 		return m.viewRun()
 	case ScreenProjects:
 		return m.viewProjects(contentHeight)
+	case ScreenManageProjects:
+		return m.viewManageProjects(contentHeight)
 	default:
 		return ""
 	}
@@ -105,6 +107,8 @@ func (m Model) navKeys() []string {
 		return []string{"tab:next", "↑↓:vars", "enter:edit/submit"}
 	case ScreenProjects:
 		return []string{"↑↓:move", "1-9:select"}
+	case ScreenManageProjects:
+		return []string{"↑↓:move", "tab:pane"}
 	default:
 		return nil
 	}
@@ -114,7 +118,7 @@ func (m Model) navKeys() []string {
 func (m Model) actionKeys() []string {
 	switch m.Screen {
 	case ScreenList:
-		return []string{"r:refresh", "p:project"}
+		return []string{"r:refresh", "p:projects"}
 	case ScreenDetail:
 		return []string{"l:logs", "r:refresh"}
 	case ScreenLogs:
@@ -123,6 +127,8 @@ func (m Model) actionKeys() []string {
 		return []string{"a:add var", "d:delete var"}
 	case ScreenProjects:
 		return []string{"enter:confirm"}
+	case ScreenManageProjects:
+		return []string{"enter:select", "d:remove", "r:refresh"}
 	default:
 		return nil
 	}

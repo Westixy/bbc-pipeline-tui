@@ -15,6 +15,7 @@ const (
 	ScreenLogs
 	ScreenRun
 	ScreenProjects
+	ScreenManageProjects
 )
 
 // State constants
@@ -78,6 +79,17 @@ type Model struct {
 	LogScrollOff  int // vertical scroll offset for log viewport
 	LogHScroll    int // horizontal scroll offset (columns)
 
+	// Manage projects
+	ManageWorkspaceInput textinput.Model
+	WorkspaceRepos       []bitbucket.Repository
+	WorkspaceReposState  int // StateLoading, StateReady, StateError
+	WorkspaceReposError  string
+	ManageFocus          int // 0 = favorites pane, 1 = browse pane
+	ManageFavCursor      int // cursor in favorites list
+	ManageRepoCursor     int // cursor in workspace repos list
+	ManageFavScrollOff   int // scroll offset in favorites pane
+	ManageRepoScrollOff  int // scroll offset in workspace repos pane
+
 	// Run form
 	RunBranch      textinput.Model
 	RunSelector    textinput.Model // custom pipeline selector pattern
@@ -117,6 +129,10 @@ func (m Model) ScreenTitle() string {
 		return prefix + " - Step Log: " + m.LogStepName
 	case ScreenRun:
 		return prefix + " - Trigger Pipeline"
+	case ScreenProjects:
+		return "Select Project"
+	case ScreenManageProjects:
+		return "Manage Projects"
 	}
 	return ""
 }

@@ -34,6 +34,12 @@ func (cc *CachedClient) InvalidateCacheForRepo(workspace, repoSlug string) {
 	cc.cache.InvalidatePrefix(prefix)
 }
 
+// InvalidateCacheForWorkspace clears cache entries for a specific workspace.
+func (cc *CachedClient) InvalidateCacheForWorkspace(workspace string) {
+	prefix := fmt.Sprintf("/repositories/%s", url.PathEscape(workspace))
+	cc.cache.InvalidatePrefix(prefix)
+}
+
 // cacheLen returns the number of cached entries (for diagnostics).
 func (cc *CachedClient) cacheLen() int {
 	return cc.cache.Len()
@@ -119,6 +125,12 @@ func (cc *CachedClient) GetFullURL(fullURL string, dest interface{}) error {
 	}
 
 	return nil
+}
+
+// ListRepositories fetches all repositories in a workspace with caching.
+func (cc *CachedClient) ListRepositories(workspace string) (*PaginatedRepositories, error) {
+	path := fmt.Sprintf("/repositories/%s?pagelen=50", url.PathEscape(workspace))
+	return cachedGet[PaginatedRepositories](cc, path, DefaultCacheTTL, DefaultMaxEntrySize)
 }
 
 // --- Non-cached mutating methods (passthrough) ---

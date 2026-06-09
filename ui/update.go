@@ -24,17 +24,23 @@ func NewModel(cfg *config.Config, client *bitbucket.CachedClient) Model {
 	runEditorInput.CharLimit = 500
 	runEditorInput.Width = 30
 
+	manageWSInput := textinput.New()
+	manageWSInput.Placeholder = "workspace"
+	manageWSInput.CharLimit = 200
+	manageWSInput.Width = 40
+
 	return Model{
-		Config:         cfg,
-		Client:         client,
-		Projects:       cfg.Projects,
-		ListState:      StateLoading,
-		RunBranch:      runBranch,
-		RunSelector:    runSelector,
-		RunEditorInput: runEditorInput,
-		RunVars:        []bitbucket.PipelineVariable{},
-		RunEditMode:    false,
-		Screen:         ScreenList,
+		Config:                cfg,
+		Client:                client,
+		Projects:              cfg.Projects,
+		ListState:             StateLoading,
+		RunBranch:             runBranch,
+		RunSelector:           runSelector,
+		RunEditorInput:        runEditorInput,
+		RunVars:               []bitbucket.PipelineVariable{},
+		RunEditMode:           false,
+		ManageWorkspaceInput:  manageWSInput,
+		Screen:                ScreenList,
 	}
 }
 
@@ -65,14 +71,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
+			if m.Screen == ScreenManageProjects {
+				// Let manage_projects handle esc stepping
+				break
+			}
 			return m.handleEsc()
 
 		case "p":
-			// Open project selection screen (list and detail screens)
+			// Open manage projects screen (list and detail screens)
 			if m.Screen == ScreenList || m.Screen == ScreenDetail {
-				if len(m.Projects) > 1 {
-					m.Screen = ScreenProjects
-				}
+				m.Screen = ScreenManageProjects
+				m.ManageFavCursor = m.ActiveProject
+				m.ManageFocus = 0
+				m.ManageWorkspaceInput.SetValue(m.Projects[m.ActiveProject].Workspace)
+				m.ManageWorkspaceInput.Blur()
+				m.WorkspaceRepos = nil
+				m.WorkspaceReposState = -1
+				m.ManageRepoCursor = 0
 			}
 			return m, nil
 		}
@@ -90,6 +105,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRun(msg)
 	case ScreenProjects:
 		return m.updateProjects(msg)
+	case ScreenManageProjects:
+		return m.updateManageProjects(msg)
 	}
 
 	return m, tea.Batch(cmds...)

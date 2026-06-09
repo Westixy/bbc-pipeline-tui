@@ -7,12 +7,12 @@ import (
 
 const (
 	// DefaultCacheTTL is the default time-to-live for cached API responses.
-	DefaultCacheTTL = 60 * time.Second
+	DefaultCacheTTL = 30 * time.Second
 	// LogCacheTTL is the TTL for step log responses (heavier, less frequent).
-	LogCacheTTL = 120 * time.Second
+	LogCacheTTL = 60 * time.Second
 	// DefaultMaxEntrySize is the maximum size in bytes for a cached entry.
 	// Entries larger than this (e.g., large step logs) are not cached.
-	DefaultMaxEntrySize = 512 * 1024 // 512 KB
+	DefaultMaxEntrySize = 256 * 1024 // 256 KB
 )
 
 // entry is a single cached item with raw JSON/text bytes and a timestamp.
