@@ -361,7 +361,7 @@ func renderScrollbar(height, pos, total int) string {
 }
 
 // varBlockRe matches the "Pipeline variables:" block in step log output.
-var varBlockRe = regexp.MustCompile(`(?m)^Pipeline variables:\n((?:\s+\w[\w.]*:\s.*\n?)*)`)
+var varBlockRe = regexp.MustCompile(`(?m)^Pipeline variables:\n((?:[ \t]+\w[\w.]*:[ \t]+[^\n]*\n)*)`)
 
 // ParsePipelineVariablesFromLog extracts pipeline variables from a step log
 // that contains a "Pipeline variables:" block.

@@ -71,7 +71,7 @@ type pipelinePreviewLoadedMsg struct {
 func fetchPipelines(client *bitbucket.CachedClient, workspace, repoSlug string) tea.Cmd {
 	return func() tea.Msg {
 		params := &bitbucket.ListPipelinesParams{
-			Pagelen: 25,
+			Pagelen: 50,
 			Sort:    "-created_on",
 		}
 		result, err := client.ListPipelines(workspace, repoSlug, params)

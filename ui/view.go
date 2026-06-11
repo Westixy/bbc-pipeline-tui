@@ -98,13 +98,13 @@ func (m Model) navKeys() []string {
 	case ScreenDetail:
 		return []string{"↑↓:steps/scroll", "pgup/pgdn:page", "home/end"}
 	case ScreenLogs:
-		return []string{"↑↓:scroll", "pgup/pgdn:page", "/:search"}
+		return []string{"↑↓:scroll", "←→:hscroll", "pgup/pgdn:page", "/:search", "n/N:next/prev match"}
 	case ScreenRun:
 		return []string{"tab:next", "↑↓:vars", "enter:edit/submit"}
 	case ScreenProjects:
-		return []string{"↑↓:move", "1-9:select"}
+		return []string{"↑↓:move", "1-9:jump"}
 	case ScreenManageProjects:
-		return []string{"↑↓:move", "tab:pane"}
+		return []string{"↑↓:move", "tab:focus pane"}
 	default:
 		return nil
 	}
@@ -118,13 +118,13 @@ func (m Model) actionKeys() []string {
 	case ScreenDetail:
 		return []string{"enter:trigger", "l:logs", "o:open", "r:refresh"}
 	case ScreenLogs:
-		return []string{"v:parse vars", "esc:back"}
+		return []string{"r:refresh", "R:auto-refresh", "esc:back"}
 	case ScreenRun:
-		return []string{"a:add var", "d:delete var"}
+		return []string{"a:add var", "d:delete var", "esc:back"}
 	case ScreenProjects:
-		return []string{"enter:confirm"}
+		return []string{"enter:confirm", "esc:cancel"}
 	case ScreenManageProjects:
-		return []string{"enter:select", "d:remove", "r:refresh"}
+		return []string{"enter:select", "d:remove", "r:refresh", "esc:back"}
 	default:
 		return nil
 	}

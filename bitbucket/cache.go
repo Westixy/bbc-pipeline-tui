@@ -23,7 +23,7 @@ type entry struct {
 }
 
 // Cache is a thread-safe in-memory cache for API responses.
-// Keys are URL paths (e.g., "/repositories/ws/repo/pipelines?pagelen=25").
+// Keys are URL paths (e.g., "/repositories/ws/repo/pipelines?pagelen=50").
 // Values are raw JSON or text bytes, which are deserialized on cache hit.
 type Cache struct {
 	mu      sync.RWMutex

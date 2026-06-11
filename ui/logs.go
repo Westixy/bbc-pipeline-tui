@@ -124,18 +124,6 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.LogMatchLines = nil
 			return m, nil
 
-		case "v":
-			// Toggle variable display: parse from log content and show parsed vars
-			if m.LogShowVars {
-				m.LogShowVars = false
-			} else {
-				if m.LogContent != "" {
-					m.ParsedLogVars = ParsePipelineVariablesFromLog(m.LogContent)
-				}
-				m.LogShowVars = true
-			}
-			return m, nil
-
 		case "n":
 			// Next search match
 			if len(m.LogMatchLines) > 0 {
@@ -189,11 +177,6 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "esc":
-			// If in vars mode, return to log
-			if m.LogShowVars {
-				m.LogShowVars = false
-				return m, nil
-			}
 			// Clear search if active, otherwise go back to detail
 			if len(m.LogMatchLines) > 0 {
 				m.LogSearchTerm = ""
@@ -344,49 +327,23 @@ func (m Model) viewLogs(contentHeight int) string {
 
 	avail := m.Width - 4
 
-	// ── Search bar ────────────────────────────────────────────────────────
+	// ── Search bar (contextual info, not duplicate key hints) ─────────────
 	var searchBar string
 	if m.LogSearchMode {
 		searchBar = FilterStyle.Render(" Search: " + m.LogSearchTerm + "_ ")
 	} else if m.LogSearchTerm != "" {
 		searchBar = FilterStyle.Render(" Search: " + m.LogSearchTerm + " ")
 	} else {
-		// Auto-refresh indicator
-		autoRefreshInfo := ""
+		searchBar = ""
 		if m.LogAutoRefresh {
-			autoRefreshInfo = " " + BadgeStyle.Render(fmt.Sprintf("  ⟳ AUTO %ds  ", m.LogAutoRefreshCountdown))
+			searchBar = BadgeStyle.Render(fmt.Sprintf(" ⟳ AUTO %ds ", m.LogAutoRefreshCountdown))
 		}
-		searchBar = DimmedStyle.Render(" / search  r refresh  R auto-refresh  esc back") + autoRefreshInfo
 	}
 
 	// Match counter
 	if len(m.LogMatchLines) > 0 && m.LogMatchIndex >= 0 {
 		searchBar += "  " + LogMatchCounterStyle.Render(
 			fmt.Sprintf("Match %d of %d", m.LogMatchIndex+1, len(m.LogMatchLines)),
-		)
-	}
-
-	// ── Parsed variables display ──────────────────────────────────────────
-	if m.LogShowVars {
-		// Show parsed pipeline variables
-		sectionTitle := SectionTitleStyle.Render(fmt.Sprintf("Pipeline Variables (%d)", len(m.ParsedLogVars)))
-		var content string
-		if len(m.ParsedLogVars) == 0 {
-			content = viewEmpty("No pipeline variables found",
-				"The step log did not contain a \"Pipeline variables:\" block")
-		} else {
-			content = CardStyle.Width(avail - 4).Render(buildVarList(m.ParsedLogVars, avail-8))
-		}
-
-		// Vars-only toggle hint
-		varsHint := BadgeStyle.Render(" variables mode ") + " " + DimmedStyle.Render("Press v to return to log")
-
-		return lipgloss.JoinVertical(lipgloss.Left,
-			searchBar,
-			DividerStyle.Render(strings.Repeat("─", avail)),
-			lipgloss.JoinVertical(lipgloss.Left, sectionTitle, content),
-			DividerStyle.Render(strings.Repeat("─", avail)),
-			DimmedStyle.Render(varsHint),
 		)
 	}
 

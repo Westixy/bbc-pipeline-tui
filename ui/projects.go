@@ -111,13 +111,5 @@ func (m Model) viewProjects(contentHeight int) string {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n")
-	sb.WriteString(DividerStyle.Render(strings.Repeat("─", avail)))
-	sb.WriteString("\n")
-	sb.WriteString(HelpGroupStyle.Render("Navigate") + " " + HelpKeyStyle.Render("↑↓") + "  " +
-		HelpGroupStyle.Render("Select") + " " + HelpKeyStyle.Render("1-9") + "  " +
-		HelpGroupStyle.Render("Confirm") + " " + HelpKeyStyle.Render("enter") + "  " +
-		HelpGroupStyle.Render("Cancel") + " " + HelpKeyStyle.Render("esc"))
-
 	return sb.String()
 }

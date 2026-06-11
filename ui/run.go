@@ -244,17 +244,6 @@ func (m Model) viewRun() string {
 		return full
 	}
 
-	// ── Footer help ───────────────────────────────────────────────────────
-	footer := DimmedStyle.Render(
-		fmt.Sprintf("tab to focus  │  a:add var  │  d:delete var  │  enter to %s",
-			func() string {
-				if m.RunFocus == 2 && len(m.RunVars) > 0 {
-					return "edit var"
-				}
-				return "trigger"
-			}()),
-	)
-
 	full := lipgloss.JoinVertical(lipgloss.Left,
 		branchInput,
 		"",
@@ -262,9 +251,6 @@ func (m Model) viewRun() string {
 		"",
 		CardTitleStyle.Render("Variables")+" "+varCount,
 		variablesContent,
-		"",
-		DividerStyle.Render(strings.Repeat("─", avail)),
-		footer,
 	)
 	return full
 }

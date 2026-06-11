@@ -213,10 +213,8 @@ func (m *Model) scrollReposIntoView() {
 func (m Model) favoritesVisibleRows() int {
 	// Left pane overhead: title(1) + divider(1) = 2 lines
 	overhead := 2
-	// Footer help line + divider
-	footer := 2
 	total := m.manageContentHeight()
-	avail := total - overhead - footer
+	avail := total - overhead
 	if avail < 0 {
 		return 0
 	}
@@ -227,9 +225,8 @@ func (m Model) favoritesVisibleRows() int {
 func (m Model) reposVisibleRows() int {
 	// Right pane overhead: title(1) + divider(1) + input row(1) + blank(1) = 4 lines
 	overhead := 4
-	footer := 2
 	total := m.manageContentHeight()
-	avail := total - overhead - footer
+	avail := total - overhead
 	if avail < 0 {
 		return 0
 	}
@@ -428,15 +425,6 @@ func (m Model) viewManageProjects(contentHeight int) string {
 		result.WriteString(DimmedStyle.Render(scrollInfo))
 		result.WriteString("\n")
 	}
-
-	// Help footer
-	result.WriteString(
-		HelpGroupStyle.Render("Navigate") + " " + HelpKeyStyle.Render("↑↓") + "  " +
-			HelpGroupStyle.Render("Pane") + " " + HelpKeyStyle.Render("tab") + "  " +
-			HelpGroupStyle.Render("Select/Add") + " " + HelpKeyStyle.Render("enter") + "  " +
-			HelpGroupStyle.Render("Remove") + " " + HelpKeyStyle.Render("d") + "  " +
-			HelpGroupStyle.Render("Refresh") + " " + HelpKeyStyle.Render("r") + "  " +
-			HelpGroupStyle.Render("Back") + " " + HelpKeyStyle.Render("esc"))
 
 	return result.String()
 }

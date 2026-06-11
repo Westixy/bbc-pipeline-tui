@@ -5,9 +5,7 @@ import "github.com/charmbracelet/lipgloss"
 // ── Color palette (dark theme, accessible) ──────────────────────────────────
 var (
 	bg            = lipgloss.Color("#0f0f1a")
-	bgSecondary   = lipgloss.Color("#222240")
 	surface       = lipgloss.Color("#1e1e3a")
-	surfaceAlt    = lipgloss.Color("#262648")
 	border        = lipgloss.Color("#3a3a5c")
 	borderFocus   = lipgloss.Color("#9d8fff")
 	accentGold    = lipgloss.Color("#ffd700")
@@ -158,14 +156,10 @@ var (
 var (
 	InputStyle = lipgloss.NewStyle().
 			Foreground(textPrimary).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(border).
 			Padding(0, 1)
 
 	FocusedInputStyle = lipgloss.NewStyle().
 				Foreground(textPrimary).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(borderFocus).
 				Padding(0, 1)
 
 	RequiredMarkerStyle = lipgloss.NewStyle().
