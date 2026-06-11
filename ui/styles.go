@@ -34,8 +34,7 @@ var (
 	AppStyle = lipgloss.NewStyle().Padding(0).Margin(0)
 
 	ContentStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Background(bg)
+			Padding(0, 2)
 )
 
 // ── Header ──────────────────────────────────────────────────────────────────
@@ -43,7 +42,6 @@ var (
 	HeaderStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accentGold).
-			Background(surface).
 			Padding(0, 2).
 			BorderBottom(true).
 			BorderStyle(lipgloss.NormalBorder()).
@@ -106,12 +104,10 @@ var (
 			Bold(true)
 
 	ListNormalStyle = lipgloss.NewStyle().
-			Foreground(textPrimary).
-			Background(bg)
+			Foreground(textPrimary)
 
 	ListAltStyle = lipgloss.NewStyle().
-			Foreground(textPrimary).
-			Background(bgSecondary)
+			Foreground(textPrimary)
 
 	ListHeaderStyle = lipgloss.NewStyle().
 			Foreground(textDimmed).
@@ -132,15 +128,13 @@ var (
 
 	PreviewTitleStyle = lipgloss.NewStyle().
 				Foreground(accentCyan).
-				Background(surface).
 				Bold(true).
 				Padding(0, 1)
 
 	CardStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(border).
-			Padding(1, 2).
-			Background(surface)
+			Padding(1, 2)
 
 	CardTitleStyle = lipgloss.NewStyle().
 			Foreground(accentGold).
@@ -164,14 +158,12 @@ var (
 var (
 	InputStyle = lipgloss.NewStyle().
 			Foreground(textPrimary).
-			Background(surface).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(border).
 			Padding(0, 1)
 
 	FocusedInputStyle = lipgloss.NewStyle().
 				Foreground(textPrimary).
-				Background(surface).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(borderFocus).
 				Padding(0, 1)
@@ -201,7 +193,6 @@ var (
 var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(textDimmed).
-			Background(surface).
 			Padding(0, 1).
 			BorderTop(true).
 			BorderStyle(lipgloss.NormalBorder()).
@@ -230,7 +221,6 @@ var (
 
 	FilterStyle = lipgloss.NewStyle().
 			Foreground(accentGold).
-			Background(surface).
 			Padding(0, 1)
 
 	// Info
