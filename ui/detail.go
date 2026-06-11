@@ -75,10 +75,12 @@ func (m Model) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// View step log
 			if len(m.Steps) > 0 {
 				step := m.Steps[m.StepCursor]
-				m.LogStepName = step.Name
-				m.LogContent = ""
-				m.LogState = StateLoading
-				m.Screen = ScreenLogs
+			m.LogStepName = step.Name
+			m.LogPipelineUUID = m.SelectedPipeline.UUID
+			m.LogStepUUID = step.UUID
+			m.LogContent = ""
+			m.LogState = StateLoading
+			m.Screen = ScreenLogs
 				workspace := m.Projects[m.ActiveProject].Workspace
 				repoSlug := m.Projects[m.ActiveProject].RepoSlug
 				return m, fetchStepLog(m.Client,

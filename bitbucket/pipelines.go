@@ -109,6 +109,17 @@ func (c *Client) ListPipelineVariables(workspace, repoSlug string) (*PaginatedPi
 	return &result, nil
 }
 
+// GetPipelineStep fetches a single step for a pipeline.
+func (c *Client) GetPipelineStep(workspace, repoSlug, pipelineUUID, stepUUID string) (*PipelineStep, error) {
+	path := BuildPipelinePath(workspace, repoSlug,
+		"pipelines/"+url.PathEscape(pipelineUUID)+"/steps/"+url.PathEscape(stepUUID))
+	var step PipelineStep
+	if err := c.doGet(path, &step); err != nil {
+		return nil, fmt.Errorf("get pipeline step: %w", err)
+	}
+	return &step, nil
+}
+
 // StopPipeline stops a running pipeline.
 func (c *Client) StopPipeline(workspace, repoSlug, pipelineUUID string) error {
 	path := BuildPipelinePath(workspace, repoSlug, "pipelines/"+url.PathEscape(pipelineUUID)+"/stopPipeline")

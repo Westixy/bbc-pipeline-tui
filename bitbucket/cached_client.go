@@ -84,6 +84,13 @@ func (cc *CachedClient) ListPipelineSteps(workspace, repoSlug, pipelineUUID stri
 	return cachedGet[PaginatedSteps](cc, path, DefaultCacheTTL, DefaultMaxEntrySize)
 }
 
+// GetPipelineStep fetches a single step with caching (short TTL for live status).
+func (cc *CachedClient) GetPipelineStep(workspace, repoSlug, pipelineUUID, stepUUID string) (*PipelineStep, error) {
+	path := BuildPipelinePath(workspace, repoSlug,
+		"pipelines/"+url.PathEscape(pipelineUUID)+"/steps/"+url.PathEscape(stepUUID))
+	return cachedGet[PipelineStep](cc, path, 5*time.Second, DefaultMaxEntrySize)
+}
+
 // GetStepLog fetches a step log with caching (longer TTL, size cap).
 func (cc *CachedClient) GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID string) (string, error) {
 	path := BuildPipelinePath(workspace, repoSlug,

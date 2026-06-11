@@ -68,17 +68,22 @@ type Model struct {
 	SplitLeftWidth     int
 
 	// Logs
-	LogContent    string
-	LogStepName   string
-	LogSearchTerm string
-	LogSearchMode bool  // true when the user is typing a search term
-	LogMatchIndex int   // current match index (-1 if no match selected)
-	LogMatchLines []int // line numbers of all matches
-	LogShowVars   bool  // show parsed variables instead of log content
-	LogState      int
-	LogError      string
-	LogScrollOff  int // vertical scroll offset for log viewport
-	LogHScroll    int // horizontal scroll offset (columns)
+	LogContent      string
+	LogStepName     string
+	LogPipelineUUID string // UUID for refresh
+	LogStepUUID     string // UUID for refresh
+	LogAutoRefresh          bool // auto-refresh every 10s until step completes
+	LogAutoRefreshCountdown int  // seconds until next auto-refresh (10→1)
+	LogPrevSize             int  // previous log size in lines, for delta display
+	LogSearchTerm   string
+	LogSearchMode   bool  // true when the user is typing a search term
+	LogMatchIndex   int   // current match index (-1 if no match selected)
+	LogMatchLines   []int // line numbers of all matches
+	LogShowVars     bool  // show parsed variables instead of log content
+	LogState        int
+	LogError        string
+	LogScrollOff    int // vertical scroll offset for log viewport
+	LogHScroll      int // horizontal scroll offset (columns)
 
 	// Manage projects
 	ManageWorkspaceInput textinput.Model

@@ -3,10 +3,21 @@ package ui
 import (
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/bbc/infra-pipeline-ui/bitbucket"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// tickMsg is sent every second while auto-refresh is active.
+type tickMsg struct{}
+
+// tickCmd returns a command that fires a tickMsg after 1 second.
+func tickCmd() tea.Cmd {
+	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg{}
+	})
+}
 
 // Messages for async operations
 type pipelinesLoadedMsg struct {
@@ -28,9 +39,10 @@ type pipelineDetailLoadedMsg struct {
 }
 
 type stepLogLoadedMsg struct {
-	content  string
-	stepName string
-	err      error
+	content       string
+	stepName      string
+	stepCompleted bool
+	err           error
 }
 
 type pipelineTriggeredMsg struct {
@@ -127,6 +139,31 @@ func fetchStepLog(client *bitbucket.CachedClient, workspace, repoSlug, pipelineU
 		return stepLogLoadedMsg{
 			content:  content,
 			stepName: stepName,
+		}
+	}
+}
+
+// fetchStepLogWithStatus loads the log for a step and checks whether the step
+// has reached a terminal state (COMPLETED, STOPPED, FAILED).  Used by the
+// refresh ("r") and auto-refresh ("R") actions so the UI can stop polling
+// once the step finishes.
+func fetchStepLogWithStatus(client *bitbucket.CachedClient, workspace, repoSlug, pipelineUUID, stepUUID, stepName string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := client.GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID)
+		if err != nil {
+			return stepLogLoadedMsg{stepName: stepName, err: err}
+		}
+		completed := false
+		if step, err := client.GetPipelineStep(workspace, repoSlug, pipelineUUID, stepUUID); err == nil {
+			switch step.State.Name {
+			case "COMPLETED", "STOPPED", "FAILED":
+				completed = true
+			}
+		}
+		return stepLogLoadedMsg{
+			content:       content,
+			stepName:      stepName,
+			stepCompleted: completed,
 		}
 	}
 }

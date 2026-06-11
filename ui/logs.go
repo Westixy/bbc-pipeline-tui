@@ -18,14 +18,53 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleErrorMsg("log", msg.err)
 			return m, nil
 		}
+		// If this was a refresh, preserve user scroll position and search state;
+		// only reset them on the initial load (StateLoading → StateReady).
+		isRefresh := m.LogState == StateReady
+		// Track previous size for delta display
+		if isRefresh {
+			m.LogPrevSize = strings.Count(m.LogContent, "\n") + 1
+		}
 		m.LogContent = msg.content
 		m.LogStepName = msg.stepName
-		m.LogSearchTerm = ""
-		m.LogMatchIndex = -1
-		m.LogMatchLines = nil
-		m.LogScrollOff = 0
-		m.LogHScroll = 0
 		m.LogState = StateReady
+		if !isRefresh {
+			m.LogSearchTerm = ""
+			m.LogMatchIndex = -1
+			m.LogMatchLines = nil
+			m.LogScrollOff = 0
+			m.LogHScroll = 0
+			m.LogPrevSize = 0
+		}
+		// Reset countdown on each successful refresh
+		if m.LogAutoRefresh {
+			m.LogAutoRefreshCountdown = 10
+		}
+		// Stop auto-refresh when the step reaches a terminal state.
+		if msg.stepCompleted && m.LogAutoRefresh {
+			m.LogAutoRefresh = false
+		}
+		return m, nil
+
+	case tickMsg:
+		// Auto-refresh: decrement countdown, fire when it reaches 0.
+		if m.LogAutoRefresh && m.LogPipelineUUID != "" && m.LogStepUUID != "" {
+			if m.LogAutoRefreshCountdown > 1 {
+				m.LogAutoRefreshCountdown--
+				return m, tickCmd()
+			}
+			// Countdown reached 0 — fire refresh
+			m.LogAutoRefreshCountdown = 10
+			m.LogScrollOff = m.maxLogScroll()
+			workspace := m.Projects[m.ActiveProject].Workspace
+			repoSlug := m.Projects[m.ActiveProject].RepoSlug
+			m.Client.InvalidateCacheForRepo(workspace, repoSlug)
+			return m, tea.Batch(
+				fetchStepLogWithStatus(m.Client, workspace, repoSlug,
+					m.LogPipelineUUID, m.LogStepUUID, m.LogStepName),
+				tickCmd(),
+			)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -117,6 +156,35 @@ func (m Model) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.LogMatchIndex = len(m.LogMatchLines) - 1
 				}
 				m.scrollToMatchLine(m.LogMatchLines[m.LogMatchIndex])
+			}
+			return m, nil
+
+		case "r":
+			// Refresh the step log once, preserving scroll and search.
+			// Stop auto-refresh if active.
+			m.LogAutoRefresh = false
+			if m.LogPipelineUUID != "" && m.LogStepUUID != "" {
+				workspace := m.Projects[m.ActiveProject].Workspace
+				repoSlug := m.Projects[m.ActiveProject].RepoSlug
+				m.Client.InvalidateCacheForRepo(workspace, repoSlug)
+				return m, fetchStepLogWithStatus(m.Client, workspace, repoSlug,
+					m.LogPipelineUUID, m.LogStepUUID, m.LogStepName)
+			}
+			return m, nil
+
+		case "R", "shift+r":
+			// Toggle auto-refresh (every 30s, scroll-to-bottom, stop on completion).
+			m.LogAutoRefresh = !m.LogAutoRefresh
+			if m.LogAutoRefresh && m.LogPipelineUUID != "" && m.LogStepUUID != "" {
+				m.LogScrollOff = m.maxLogScroll()
+				workspace := m.Projects[m.ActiveProject].Workspace
+				repoSlug := m.Projects[m.ActiveProject].RepoSlug
+				m.Client.InvalidateCacheForRepo(workspace, repoSlug)
+				return m, tea.Batch(
+					fetchStepLogWithStatus(m.Client, workspace, repoSlug,
+						m.LogPipelineUUID, m.LogStepUUID, m.LogStepName),
+					tickCmd(),
+				)
 			}
 			return m, nil
 
@@ -283,7 +351,12 @@ func (m Model) viewLogs(contentHeight int) string {
 	} else if m.LogSearchTerm != "" {
 		searchBar = FilterStyle.Render(" Search: " + m.LogSearchTerm + " ")
 	} else {
-		searchBar = DimmedStyle.Render(" Press / to search, esc to go back")
+		// Auto-refresh indicator
+		autoRefreshInfo := ""
+		if m.LogAutoRefresh {
+			autoRefreshInfo = " " + BadgeStyle.Render(fmt.Sprintf("  ⟳ AUTO %ds  ", m.LogAutoRefreshCountdown))
+		}
+		searchBar = DimmedStyle.Render(" / search  r refresh  R auto-refresh  esc back") + autoRefreshInfo
 	}
 
 	// Match counter
@@ -344,9 +417,23 @@ func (m Model) viewLogs(contentHeight int) string {
 	if totalLines > viewportH {
 		scrollPct = scrollOff * 100 / (totalLines - viewportH)
 	}
-	scrollInfo := DimmedStyle.Render(
-		fmt.Sprintf("Lines %d-%d of %d (%d%%)",
-			start+1, end, totalLines, scrollPct))
+	// Size delta: compare current line count with previous
+	sizeDelta := 0
+	if m.LogPrevSize > 0 && totalLines != m.LogPrevSize {
+		sizeDelta = totalLines - m.LogPrevSize
+	}
+	scrollText := fmt.Sprintf("Lines %d-%d of %d (%d%%)",
+		start+1, end, totalLines, scrollPct)
+	if sizeDelta > 0 {
+		scrollText += fmt.Sprintf("  +%d lines", sizeDelta)
+	} else if sizeDelta < 0 {
+		scrollText += fmt.Sprintf("  %d lines", sizeDelta)
+	}
+	// Auto-refresh countdown in scroll bar
+	if m.LogAutoRefresh {
+		scrollText += fmt.Sprintf("  next refresh in %ds", m.LogAutoRefreshCountdown)
+	}
+	scrollInfo := DimmedStyle.Render(scrollText)
 
 	// Pre-compute highlight positions for each visible line
 	highlightPositions := make([][2]int, len(visible))
