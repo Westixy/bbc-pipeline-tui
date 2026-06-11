@@ -23,6 +23,9 @@ func (c *Client) ListPipelines(workspace, repoSlug string, params *ListPipelines
 		if params.Fields != "" {
 			q.Set("fields", params.Fields)
 		}
+		if params.Filter != "" {
+			q.Set("q", params.Filter)
+		}
 	}
 	path := basePath
 	if len(q) > 0 {

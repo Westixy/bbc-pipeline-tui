@@ -334,6 +334,7 @@ type ListPipelinesParams struct {
 	Page    int
 	Sort    string // e.g., "-created_on"
 	Fields  string
+	Filter  string // e.g., "target.ref_name=\"main\"" — Bitbucket q parameter
 }
 
 // BuildPipelinePath builds the API path for a workspace/repo resource.

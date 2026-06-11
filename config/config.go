@@ -10,8 +10,8 @@ import (
 
 // Project represents a Bitbucket workspace and repository pair.
 type Project struct {
-	Workspace string `yaml:"workspace"`
-	RepoSlug  string `yaml:"repo_slug"`
+	Workspace string `yaml:"workspace" json:"workspace"`
+	RepoSlug  string `yaml:"repo_slug" json:"repo_slug"`
 }
 
 // Config holds the application configuration.

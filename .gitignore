@@ -1,2 +1,8 @@
 result
 infra-pipeline-ui
+
+# WebApp build output
+server/webapp-dist/
+
+# Node
+webapp/node_modules/
