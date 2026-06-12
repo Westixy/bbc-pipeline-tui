@@ -82,6 +82,7 @@
   }
 
   let lastLoaded = ''; // plain variable, NOT reactive — prevents re-entrant loops
+  let selectedIndex = $state(null);
 
   // Load/reload pipelines when project, filter, or sort changes, or on refresh
   $effect(() => {
@@ -90,8 +91,41 @@
     if ($page !== 'list') return;
     if (lastLoaded === key) return;
     lastLoaded = key;
+    selectedIndex = null;
     loadPipelines(1);
   });
+
+  // Listen for app:refresh event
+  $effect(() => {
+    function onRefresh() {
+      if ($page === 'list') {
+        lastLoaded = '';
+        loadPipelines(1);
+      }
+    }
+    window.addEventListener('app:refresh', onRefresh);
+    return () => window.removeEventListener('app:refresh', onRefresh);
+  });
+
+  // Keyboard navigation for pipeline rows
+  function handleRowKeydown(e, index) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = Math.min(index + 1, $pipelines.length - 1);
+      selectedIndex = next;
+      // Scroll into view if needed
+      document.querySelector(`[data-row-index="${next}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = Math.max(index - 1, 0);
+      selectedIndex = prev;
+      document.querySelector(`[data-row-index="${prev}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const pipe = $pipelines[index];
+      if (pipe) viewDetail(pipe);
+    }
+  }
 </script>
 
 <div class="pipeline-list">
@@ -160,8 +194,18 @@
           </tr>
         </thead>
         <tbody>
-          {#each $pipelines as pipe}
-            <tr class="pipe-row" ondblclick={() => viewDetail(pipe)}>
+          {#each $pipelines as pipe, index}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <tr
+              class="pipe-row"
+              class:selected-row={selectedIndex === index}
+              data-row-index={index}
+              tabindex="0"
+              role="button"
+              aria-label="Pipeline #{pipe.build_number} - {statusLabel(pipe.state)}"
+              onclick={() => viewDetail(pipe)}
+              onkeydown={(e) => handleRowKeydown(e, index)}
+            >
               <td class="cell-num">{pipe.build_number || '—'}</td>
               <td>
                 <span class="target-badge">{pipe.target?.ref_name || pipe.target?.type || '—'}</span>
@@ -414,6 +458,16 @@
 
   .pipe-row:hover {
     background: #1a1d23;
+  }
+
+  .pipe-row:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px #1d9bf0;
+  }
+
+  .selected-row {
+    background: #13233a !important;
+    border-left: 3px solid #1d9bf0;
   }
 
   .cell-num {

@@ -2,6 +2,7 @@
   import { projects, activeProjectId, activeProject, notification } from './stores/appState.js';
   import { page, initRoute, navigateTo, workspaceFromUrl, repoSlugFromUrl } from './stores/router.js';
   import { listProjects } from './stores/api.js';
+  import { registerShortcut, handleShortcut } from './lib/keyboard.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
   import PipelineDetail from './lib/PipelineDetail.svelte';
@@ -9,10 +10,29 @@
   import ManageProjects from './lib/ManageProjects.svelte';
   import PipelineTrigger from './lib/PipelineTrigger.svelte';
   import Notification from './lib/Notification.svelte';
+  import { fade, fly } from 'svelte/transition';
 
   let loading = $state(true);
   let loadError = $state(null);
   let dataLoaded = false;
+  let prevPage = $state(null);
+
+  const pageTitles = {
+    list: 'Pipelines',
+    detail: 'Pipeline Detail',
+    logs: 'Pipeline Logs',
+    trigger: 'Trigger Pipeline',
+    manage: 'Manage Projects',
+  };
+
+  /** Update document title based on current page and project */
+  function updateTitle() {
+    const pg = $page;
+    const proj = $activeProject;
+    const base = pageTitles[pg] || 'BBC Pipeline Manager';
+    const suffix = proj ? ` · ${proj.name}` : '';
+    document.title = `${base}${suffix} · BBC Pipeline Manager`;
+  }
 
   /** Find project index by workspace and repoSlug. Returns -1 if not found. */
   function findProjectIndex(workspace, repoSlug) {
@@ -28,7 +48,6 @@
       const count = (data.projects || []).length;
 
       if (count > 0) {
-        // Restore active project from workspace/repoSlug in URL, otherwise default to 0
         const ws = $workspaceFromUrl;
         const rs = $repoSlugFromUrl;
         let idx = -1;
@@ -41,6 +60,7 @@
       } else {
         initRoute(false);
       }
+      updateTitle();
     } catch (e) {
       console.error('Failed to load projects:', e);
       loadError = e.message || 'Failed to load projects';
@@ -50,7 +70,6 @@
   }
 
   // Keep the URL hash in sync with the current project and page.
-  // Only syncs for pages that involve a project (not 'manage').
   $effect(() => {
     const pg = $page;
     if (!pg || pg === 'manage') return;
@@ -65,7 +84,6 @@
     } else if (pg === 'trigger') {
       expected = `#/bbc/${ws}/${rs}/trigger`;
     } else {
-      // For detail/logs pages, keep the rest of the hash intact
       return;
     }
 
@@ -85,12 +103,68 @@
     }
   });
 
+  // Update document title whenever page or project changes
+  $effect(() => {
+    if ($page && !loading) updateTitle();
+    // Track previous page for transition direction
+    prevPage = $page;
+  });
+
+  // Load data once on mount
   $effect(() => {
     if (dataLoaded) return;
     dataLoaded = true;
     loadData();
   });
+
+  // Register global keyboard shortcuts
+  $effect(() => {
+    if (loading) return;
+
+    registerShortcut('Escape', () => {
+      const pg = $page;
+      if (pg === 'detail' || pg === 'logs' || pg === 'trigger') {
+        navigateTo('list');
+      }
+    }, 'Back to pipeline list');
+
+    registerShortcut('r', () => {
+      // Refresh — dispatch a custom event that views can listen to
+      window.dispatchEvent(new CustomEvent('app:refresh'));
+    }, 'Refresh current view');
+
+    registerShortcut('n', () => {
+      if ($activeProject) navigateTo('trigger');
+    }, 'New pipeline trigger');
+
+    registerShortcut('g', () => {
+      if ($activeProject) navigateTo('list');
+    }, 'Go to pipelines');
+
+    registerShortcut('m', () => {
+      navigateTo('manage');
+    }, 'Manage projects');
+
+    return () => {};
+  });
+
+  function onGlobalKeydown(e) {
+    handleShortcut(e);
+  }
+
+  // Determine transition direction based on page navigation
+  function pageDirection() {
+    // If going from list -> detail/logs/trigger, slide left
+    // If going from detail/logs/trigger -> list, slide right
+    const forward = ['detail', 'logs', 'trigger'];
+    const backward = ['list'];
+    if (forward.includes($page) && backward.includes(prevPage || '')) return 'left';
+    if (backward.includes($page) && forward.includes(prevPage || '')) return 'right';
+    return 'none';
+  }
 </script>
+
+<svelte:window onkeydown={onGlobalKeydown} />
 
 {#if loading}
   <div class="loading-screen">
@@ -100,8 +174,11 @@
 {:else if loadError}
   <div class="loading-screen error">
     <div class="error-icon">⚠️</div>
+    <h2>Failed to Load</h2>
     <p>{loadError}</p>
-    <button class="btn btn-primary" onclick={loadData}>Retry</button>
+    <button class="btn btn-primary" onclick={loadData}>
+      🔄 Retry
+    </button>
   </div>
 {:else}
   <div class="app">
@@ -111,31 +188,53 @@
     <main class="main-content">
       {#if $activeProject}
         {#if $page === 'list'}
-          <PipelineList />
+          <div in:fly={{ x: pageDirection() === 'right' ? -80 : 80, duration: 200 }} out:fade={{ duration: 120 }}>
+            <PipelineList />
+          </div>
         {:else if $page === 'detail'}
-          <PipelineDetail />
+          <div in:fade={{ duration: 180 }} out:fade={{ duration: 100 }}>
+            <PipelineDetail />
+          </div>
         {:else if $page === 'logs'}
-          <PipelineLog />
+          <div in:fade={{ duration: 180 }} out:fade={{ duration: 100 }}>
+            <PipelineLog />
+          </div>
         {:else if $page === 'trigger'}
-          <PipelineTrigger />
+          <div in:fade={{ duration: 180 }} out:fade={{ duration: 100 }}>
+            <PipelineTrigger />
+          </div>
         {:else if $page === 'manage'}
-          <ManageProjects />
+          <div in:fly={{ x: 80, duration: 200 }} out:fade={{ duration: 120 }}>
+            <ManageProjects />
+          </div>
         {/if}
       {:else}
         {#if $page === 'manage'}
-          <ManageProjects />
+          <div in:fade={{ duration: 200 }}>
+            <ManageProjects />
+          </div>
         {:else}
-          <div class="empty-state">
+          <div class="empty-state" in:fade={{ duration: 300 }}>
             <div class="empty-icon">🚀</div>
             <h2>No Projects Configured</h2>
             <p>Go to Manage Projects to add your first Bitbucket repository.</p>
             <button class="btn btn-primary" onclick={() => navigateTo('manage')}>
-              Manage Projects
+              ⚙ Manage Projects
             </button>
           </div>
         {/if}
       {/if}
     </main>
+
+    <!-- Keyboard shortcuts hint bar -->
+    <footer class="shortcuts-bar">
+      <span class="shortcut-hint">Shortcuts:</span>
+      <kbd>g</kbd> List
+      <kbd>n</kbd> Trigger
+      <kbd>m</kbd> Manage
+      <kbd>r</kbd> Refresh
+      <kbd>Esc</kbd> Back
+    </footer>
   </div>
 {/if}
 
@@ -153,6 +252,17 @@
     min-height: 100vh;
   }
 
+  :global(::selection) {
+    background: rgba(29, 155, 240, 0.3);
+    color: #e7e9ea;
+  }
+
+  :global(:focus-visible) {
+    outline: 2px solid #1d9bf0;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   .loading-screen {
     display: flex;
     flex-direction: column;
@@ -161,10 +271,16 @@
     min-height: 100vh;
     gap: 1rem;
     color: #71767b;
+    animation: fadeIn 0.3s ease;
   }
 
   .loading-screen.error {
     color: #e7e9ea;
+  }
+
+  .loading-screen.error h2 {
+    margin-bottom: 0.25rem;
+    font-size: 1.3rem;
   }
 
   .error-icon {
@@ -182,6 +298,11 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .app {
@@ -229,6 +350,7 @@
     font-weight: 600;
     cursor: pointer;
     transition: background 0.2s;
+    font-family: inherit;
   }
 
   .btn-primary {
@@ -238,5 +360,36 @@
 
   .btn-primary:hover {
     background: #1a8cd8;
+  }
+
+  .shortcuts-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    background: #0d1117;
+    border-top: 1px solid #2f3336;
+    font-size: 0.72rem;
+    color: #484f58;
+  }
+
+  .shortcut-hint {
+    margin-right: 0.5rem;
+    font-weight: 600;
+    color: #71767b;
+  }
+
+  kbd {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    margin: 0 0.35rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.68rem;
+    color: #8b949e;
+    background: #16181c;
+    border: 1px solid #2f3336;
+    border-radius: 4px;
+    line-height: 1.5;
   }
 </style>
