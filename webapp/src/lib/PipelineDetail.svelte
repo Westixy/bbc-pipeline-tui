@@ -189,10 +189,11 @@
     return `${name} — ${status}`;
   }
 
-  function stepDotClass(state) {
-    const status = resolveStepStatus(state);
+  function stepDotClass(state, idx) {
+    const status = effectiveStepStatus(state, idx);
     if (status === 'SUCCESSFUL') return 'dot-success';
     if (status === 'FAILED') return 'dot-error';
+    if (status === 'SKIPPED') return 'dot-skipped';
     if (status === 'IN_PROGRESS') return 'dot-running';
     if (status === 'STOPPED') return 'dot-stopped';
     return 'dot-pending';
@@ -208,10 +209,11 @@
     return 'badge-neutral';
   }
 
-  function stepStatusBadgeClass(state) {
-    const status = resolveStepStatus(state);
+  function stepStatusBadgeClass(state, idx) {
+    const status = effectiveStepStatus(state, idx);
     if (status === 'SUCCESSFUL') return 'badge-success';
     if (status === 'FAILED') return 'badge-error';
+    if (status === 'SKIPPED') return 'badge-skipped';
     if (status === 'IN_PROGRESS') return 'badge-info';
     if (status === 'STOPPED') return 'badge-warning';
     return 'badge-neutral';
@@ -288,23 +290,39 @@
     return () => window.removeEventListener('app:refresh', onRefresh);
   });
 
-  let completedSteps = $derived($selectedSteps.filter(s => {
+  let completedSteps = $derived($selectedSteps.filter(s => resolveStepStatus(s.state) === 'SUCCESSFUL').length);
+  let finishedSteps = $derived($selectedSteps.filter(s => {
     const st = resolveStepStatus(s.state);
     return st === 'SUCCESSFUL' || st === 'FAILED' || st === 'STOPPED';
   }).length);
   let totalSteps = $derived($selectedSteps.length);
   let pipelineRunning = $derived($selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING');
+  let pipelineFailed = $derived($selectedPipeline?.state?.name === 'FAILED' || $selectedPipeline?.state?.result?.name === 'FAILED');
+  let pipelineStopped = $derived($selectedPipeline?.state?.name === 'STOPPED' || $selectedPipeline?.state?.result?.name === 'STOPPED');
+  let hasFailedStep = $derived($selectedSteps.some(s => resolveStepStatus(s.state) === 'FAILED'));
+  let hasStoppedStep = $derived($selectedSteps.some(s => resolveStepStatus(s.state) === 'STOPPED'));
+  let firstFailedIdx = $derived($selectedSteps.findIndex(s => resolveStepStatus(s.state) === 'FAILED'));
+  let firstStoppedIdx = $derived($selectedSteps.findIndex(s => resolveStepStatus(s.state) === 'STOPPED'));
+  let breakIdx = $derived(firstFailedIdx >= 0 ? firstFailedIdx : (firstStoppedIdx >= 0 ? firstStoppedIdx : -1));
+
+  function effectiveStepStatus(state, idx) {
+    const status = resolveStepStatus(state);
+    if (breakIdx >= 0 && idx > breakIdx) return 'SKIPPED';
+    return status;
+  }
 
   let summaryItems = $derived.by(() => {
     const steps = $selectedSteps;
-    const succeeded = steps.filter(s => resolveStepStatus(s.state) === 'SUCCESSFUL').length;
-    const failed = steps.filter(s => resolveStepStatus(s.state) === 'FAILED').length;
-    const running = steps.filter(s => resolveStepStatus(s.state) === 'IN_PROGRESS').length;
-    const pending = steps.filter(s => resolveStepStatus(s.state) === 'PENDING').length;
-    const stopped = steps.filter(s => resolveStepStatus(s.state) === 'STOPPED').length;
+    const succeeded = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'SUCCESSFUL').length;
+    const failed = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'FAILED').length;
+    const skipped = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'SKIPPED').length;
+    const running = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'IN_PROGRESS').length;
+    const pending = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'PENDING').length;
+    const stopped = steps.filter((s, i) => effectiveStepStatus(s.state, i) === 'STOPPED').length;
     const items = [];
     if (succeeded > 0) items.push({ label: 'Done', count: succeeded, icon: 'check', cls: 'chip-success' });
     if (failed > 0) items.push({ label: 'Failed', count: failed, icon: 'x', cls: 'chip-error' });
+    if (skipped > 0) items.push({ label: 'Skipped', count: skipped, icon: 'skip', cls: 'chip-skipped' });
     if (running > 0) items.push({ label: 'Running', count: running, icon: 'loading', cls: 'chip-running' });
     if (pending > 0) items.push({ label: 'Pending', count: pending, icon: 'pending', cls: 'chip-pending' });
     if (stopped > 0) items.push({ label: 'Stopped', count: stopped, icon: 'clock', cls: 'chip-stopped' });
@@ -479,20 +497,23 @@
               </span>
             {/each}
           </div>
-          <span class="timeline-percentage" class:done={completedSteps === totalSteps}>
-            {#if completedSteps === totalSteps}✓{/if}
-            {completedSteps}/{totalSteps}
+          <span class="timeline-percentage" class:done={finishedSteps === totalSteps && !pipelineFailed && !pipelineStopped} class:failed={pipelineFailed || hasFailedStep} class:stopped={pipelineStopped || hasStoppedStep}>
+            {#if finishedSteps === totalSteps && !pipelineFailed && !pipelineStopped}✓{/if}
+            {#if pipelineFailed || hasFailedStep}✕{/if}
+            {#if pipelineStopped || hasStoppedStep}■{/if}
+            {finishedSteps}/{totalSteps}
           </span>
         </div>
 
         <div class="timeline-track">
           {#each $selectedSteps as step, i}
-            {@const stepStatus = resolveStepStatus(step.state)}
+            {@const stepStatus = effectiveStepStatus(step.state, i)}
             <div class="timeline-step" style="flex: 1;">
               <button
                 class="timeline-step-node"
                 class:node-success={stepStatus === 'SUCCESSFUL'}
                 class:node-failed={stepStatus === 'FAILED'}
+                class:node-skipped={stepStatus === 'SKIPPED'}
                 class:node-running={stepStatus === 'IN_PROGRESS'}
                 class:node-stopped={stepStatus === 'STOPPED'}
                 class:node-pending={stepStatus === 'PENDING'}
@@ -513,12 +534,21 @@
                   <span class="node-spinner"></span>
                 {:else if stepStatus === 'STOPPED'}
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+                {:else if stepStatus === 'SKIPPED'}
+                  <span class="node-skip-dash">—</span>
                 {:else}
                   <span class="node-empty-dot"></span>
                 {/if}
               </button>
               {#if i < totalSteps - 1}
-                <div class="timeline-connector" class:conn-done={stepStatus === 'SUCCESSFUL' || stepStatus === 'FAILED' || stepStatus === 'STOPPED'} class:conn-running={stepStatus === 'IN_PROGRESS'}></div>
+                {@const nextStatus = effectiveStepStatus($selectedSteps[i + 1]?.state, i + 1)}
+                <div class="timeline-connector"
+                  class:conn-done={stepStatus === 'SUCCESSFUL' && nextStatus !== 'PENDING'}
+                  class:conn-failed={stepStatus === 'FAILED'}
+                  class:conn-stopped={stepStatus === 'STOPPED'}
+                  class:conn-skipped={stepStatus === 'SKIPPED'}
+                  class:conn-running={stepStatus === 'IN_PROGRESS'}
+                ></div>
               {/if}
               <div class="timeline-step-label-wrap">
                 <span class="timeline-step-num">#{i + 1}</span>
@@ -551,19 +581,23 @@
             </div>
             <div class="steps-body">
               {#each $selectedSteps as step, i}
+                {@const effStatus = effectiveStepStatus(step.state, i)}
                 <div
                   class="step-row"
-                  class:step-row-active={resolveStepStatus(step.state) === 'IN_PROGRESS'}
-                  class:step-row-failed={resolveStepStatus(step.state) === 'FAILED'}
+                  class:step-row-active={effStatus === 'IN_PROGRESS'}
+                  class:step-row-failed={effStatus === 'FAILED'}
+                  class:step-row-skipped={effStatus === 'SKIPPED'}
                 >
                   <div class="col-dot">
-                    <span class="step-dot {stepDotClass(step.state)}"></span>
+                    <span class="step-dot {stepDotClass(step.state, i)}"></span>
                   </div>
                   <div class="col-name" title={step.name}>
                     <span class="step-name-text">{step.name || `Step ${i + 1}`}</span>
                   </div>
                   <div class="col-status">
-                    <span class="badge {stepStatusBadgeClass(step.state)} step-badge">{statusLabel(step.state)}</span>
+                    <span class="badge {stepStatusBadgeClass(step.state, i)} step-badge">
+                      {effStatus === 'SKIPPED' ? 'skipped' : statusLabel(step.state)}
+                    </span>
                   </div>
                   <div class="col-duration">
                     {#if step.duration_in_seconds != null}
@@ -956,6 +990,7 @@
   .summary-chip.chip-error   { background: rgba(244,71,71,0.12);  color: var(--error); }
   .summary-chip.chip-running { background: var(--accent-muted);   color: var(--accent-text); }
   .summary-chip.chip-pending { background: var(--bg-input);       color: var(--text-tertiary); }
+  .summary-chip.chip-skipped { background: var(--bg-input);       color: var(--text-tertiary); opacity: 0.65; }
   .summary-chip.chip-stopped { background: var(--warning-bg);     color: var(--warning); }
   .summary-chip strong { font-weight: 700; font-family: var(--font-mono); }
 
@@ -985,6 +1020,12 @@
   }
   .timeline-percentage.done {
     color: var(--success);
+  }
+  .timeline-percentage.failed {
+    color: var(--error);
+  }
+  .timeline-percentage.stopped {
+    color: var(--warning);
   }
 
   /* ── Timeline Track ─────────────────────────────────── */
@@ -1052,6 +1093,12 @@
     border-color: var(--warning);
     color: var(--warning);
   }
+  .node-skipped {
+    background: var(--bg-root);
+    border-color: var(--border-default);
+    color: var(--text-tertiary);
+    opacity: 0.5;
+  }
   .node-pending {
     background: var(--bg-root);
     border-color: var(--border-default);
@@ -1066,6 +1113,13 @@
     animation: spin 0.7s linear infinite;
   }
 
+  .node-skip-dash {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    line-height: 1;
+    opacity: 0.4;
+  }
   .node-empty-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
@@ -1084,6 +1138,18 @@
   }
   .timeline-connector.conn-done {
     background: var(--success);
+  }
+  .timeline-connector.conn-failed {
+    background: var(--error);
+    opacity: 0.6;
+  }
+  .timeline-connector.conn-stopped {
+    background: var(--border-emphasis);
+    opacity: 0.5;
+  }
+  .timeline-connector.conn-skipped {
+    background: var(--bg-input);
+    opacity: 0.3;
   }
   .timeline-connector.conn-running {
     background: linear-gradient(90deg, var(--accent-text) 40%, var(--bg-input) 60%);
@@ -1182,6 +1248,7 @@
   .step-row:hover { background: var(--bg-hover); }
   .step-row-active { background: var(--bg-selection); border-bottom-color: var(--accent); }
   .step-row-failed { background: rgba(244,71,71,0.04); }
+  .step-row-skipped { opacity: 0.55; }
 
   .col-dot {
     width: 16px;
@@ -1201,6 +1268,7 @@
   .dot-error   { background: var(--error); }
   .dot-running { background: var(--accent-text); animation: pulse-dot 1.5s ease-in-out infinite; }
   .dot-stopped { background: var(--border-emphasis); }
+  .dot-skipped { background: var(--text-tertiary); opacity: 0.4; }
   .dot-pending { background: var(--bg-root); border: 1.5px solid var(--border-default); }
 
   .col-name {
