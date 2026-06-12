@@ -1,120 +1,126 @@
 <script>
-  import { currentScreen, activeProjectId, activeProject, showError, showSuccess, triggerState, triggerError, triggerSuccess } from '../stores/appState.js';
+  import { activeProject, triggerPreTarget, triggerPreSelector, triggerPreVars, triggerState, triggerError, showSuccess, showError } from '../stores/appState.js';
+  import { navigateTo } from '../stores/router.js';
   import { triggerPipeline } from '../stores/api.js';
 
   let target = $state('');
+  let selector = $state(null);
   let variables = $state([]);
-  let submitting = $state(false);
+  let initialized = false;
 
-  function addVariable() {
+  $effect(() => {
+    if (initialized) return;
+    initialized = true;
+    target = $triggerPreTarget || '';
+    selector = $triggerPreSelector || null;
+    const preVars = $triggerPreVars || [];
+    variables = preVars.length > 0
+      ? preVars.map(v => ({ key: v.key, value: v.value }))
+      : [{ key: '', value: '' }];
+  });
+
+  function addVar() {
     variables = [...variables, { key: '', value: '' }];
   }
 
-  function removeVariable(i) {
-    variables = variables.filter((_, idx) => idx !== i);
+  function removeVar(index) {
+    variables = variables.filter((_, i) => i !== index);
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleTrigger() {
+    if (!$activeProject) return;
     if (!target.trim()) {
-      showError('Target (branch/tag) is required');
+      triggerError.set('Target branch is required');
       return;
     }
-    if (!$activeProject) return;
-
-    submitting = true;
     triggerState.set('submitting');
     triggerError.set('');
-    triggerSuccess.set('');
-
     try {
-      const filteredVars = variables
-        .filter(v => v.key.trim())
+      const cleanVars = variables
+        .filter(v => v.key.trim() !== '')
         .map(v => ({ key: v.key.trim(), value: v.value }));
-
-      await triggerPipeline($activeProject.id, target.trim(), filteredVars);
+      await triggerPipeline($activeProject.id, target.trim(), cleanVars, selector);
       showSuccess(`Pipeline triggered on "${target.trim()}"`);
-      target = '';
-      variables = [];
-      triggerState.set('success');
-      // Navigate to list after a short delay
-      setTimeout(() => currentScreen.set('list'), 1500);
+      navigateTo('list');
     } catch (e) {
-      triggerError.set(e.message);
-      triggerState.set('error');
+      triggerError.set(e.message || 'Trigger failed');
     } finally {
-      submitting = false;
+      triggerState.set('idle');
     }
   }
 </script>
 
-<div class="pipeline-trigger">
+<div class="trigger-view">
   <div class="trigger-header">
-    <button class="btn btn-secondary" onclick={() => currentScreen.set('list')}>
+    <button class="btn btn-secondary" onclick={() => navigateTo('list')}>
       ← Back to list
     </button>
-    <h2>Trigger Pipeline — {$activeProject?.name || 'Unknown'}</h2>
+    <h2>▶ Run Pipeline</h2>
   </div>
 
-  <form class="trigger-form" onsubmit={handleSubmit}>
-    <div class="form-group">
-      <label class="form-label" for="target">Target (branch or tag)</label>
+  <form class="trigger-form" onsubmit={(e) => { e.preventDefault(); handleTrigger(); }}>
+    <div class="form-section">
+      <label class="form-label" for="target-input">Target Branch</label>
       <input
-        id="target"
+        id="target-input"
         type="text"
         class="form-input"
-        placeholder="e.g. main, develop, v1.0.0"
         bind:value={target}
-        required
+        placeholder="e.g. main"
       />
     </div>
 
-    <div class="form-group">
-      <div class="form-label-row">
-        <label class="form-label">Variables</label>
-        <button type="button" class="btn btn-small" onclick={addVariable}>
-          + Add Variable
-        </button>
+    {#if selector}
+      <div class="form-section">
+        <label class="form-label">Pipeline Definition</label>
+        <div class="selector-display">
+          <span class="selector-badge">{selector.type}:{selector.pattern}</span>
+        </div>
       </div>
-      {#if variables.length > 0}
-        <div class="variables-list">
-          {#each variables as variable, i}
-            <div class="variable-row">
+    {/if}
+
+    <div class="form-section">
+      <div class="vars-header">
+        <label class="form-label">Variables</label>
+        <button type="button" class="btn btn-small" onclick={addVar}>+ Add</button>
+      </div>
+      {#if variables.length === 0}
+        <p class="empty-text">No variables</p>
+      {:else}
+        <div class="vars-list">
+          {#each variables as v, i}
+            <div class="var-row">
               <input
                 type="text"
                 class="form-input var-key"
                 placeholder="KEY"
-                bind:value={variable.key}
+                bind:value={v.key}
               />
               <input
                 type="text"
                 class="form-input var-value"
-                placeholder="Value"
-                bind:value={variable.value}
+                placeholder="value"
+                bind:value={v.value}
               />
-              <button type="button" class="btn btn-danger-small" onclick={() => removeVariable(i)}>
-                ✕
-              </button>
+              <button type="button" class="btn btn-icon btn-danger" onclick={() => removeVar(i)} title="Remove">✕</button>
             </div>
           {/each}
         </div>
-      {:else}
-        <p class="form-hint">No custom variables. Add variables if your pipeline requires them.</p>
       {/if}
     </div>
 
     {#if $triggerError}
-      <div class="form-error">❌ {$triggerError}</div>
+      <div class="trigger-error">❌ {$triggerError}</div>
     {/if}
 
-    <button type="submit" class="btn btn-primary btn-submit" disabled={submitting}>
-      {submitting ? '⏳ Triggering...' : '▶ Trigger Pipeline'}
+    <button type="submit" class="btn btn-primary btn-run" disabled={$triggerState === 'submitting'}>
+      {$triggerState === 'submitting' ? '⏳ Running...' : '▶ Run Pipeline'}
     </button>
   </form>
 </div>
 
 <style>
-  .pipeline-trigger {
+  .trigger-view {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -124,12 +130,120 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    flex-wrap: wrap;
   }
 
   .trigger-header h2 {
     font-size: 1.3rem;
     font-weight: 600;
+  }
+
+  .trigger-form {
+    background: #16181c;
+    border: 1px solid #2f3336;
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    max-width: 600px;
+  }
+
+  .form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .form-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #e7e9ea;
+  }
+
+  .form-input {
+    background: #0f1419;
+    border: 1px solid #2f3336;
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    color: #e7e9ea;
+    font-size: 0.9rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .form-input:focus {
+    border-color: #1d9bf0;
+  }
+
+  .form-input::placeholder {
+    color: #71767b;
+  }
+
+  .vars-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .vars-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .var-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .var-key {
+    flex: 1;
+  }
+
+  .var-value {
+    flex: 2;
+  }
+
+  .btn-icon {
+    background: none;
+    border: none;
+    color: #f85149;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+
+  .btn-icon:hover {
+    background: #3e1a1a;
+  }
+
+  .trigger-error {
+    background: #3e1a1a;
+    color: #f85149;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    border: 1px solid #5c2424;
+  }
+
+  .btn-run {
+    align-self: flex-start;
+    padding: 0.625rem 2rem;
+  }
+
+  .btn-run:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .empty-text {
+    color: #71767b;
+    font-style: italic;
+    font-size: 0.85rem;
   }
 
   .btn {
@@ -161,127 +275,14 @@
     background: #1a8cd8;
   }
 
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .btn-small {
     padding: 0.25rem 0.75rem;
     font-size: 0.8rem;
     background: #2f3336;
     color: #e7e9ea;
-    border: none;
-    border-radius: 9999px;
-    cursor: pointer;
   }
 
   .btn-small:hover {
     background: #3e4144;
-  }
-
-  .btn-danger-small {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.8rem;
-    background: #b91c1c;
-    color: #fff;
-    border: none;
-    border-radius: 9999px;
-    cursor: pointer;
-  }
-
-  .btn-danger-small:hover {
-    background: #991b1b;
-  }
-
-  .btn-submit {
-    align-self: flex-start;
-    padding: 0.75rem 2rem;
-    font-size: 1rem;
-  }
-
-  .trigger-form {
-    background: #16181c;
-    border: 1px solid #2f3336;
-    border-radius: 12px;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    max-width: 640px;
-  }
-
-  .form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .form-label {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #8b949e;
-  }
-
-  .form-label-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .form-input {
-    background: #0d1117;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-    padding: 0.625rem 0.875rem;
-    color: #e7e9ea;
-    font-size: 0.9rem;
-    outline: none;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .form-input:focus {
-    border-color: #1d9bf0;
-  }
-
-  .form-input::placeholder {
-    color: #484f58;
-  }
-
-  .form-hint {
-    color: #484f58;
-    font-size: 0.85rem;
-    font-style: italic;
-  }
-
-  .form-error {
-    background: #3e1a1a;
-    border: 1px solid #670606;
-    color: #f4a2a2;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-  }
-
-  .variables-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .variable-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .var-key {
-    max-width: 160px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .var-value {
-    flex: 1;
   }
 </style>

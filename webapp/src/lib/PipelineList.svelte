@@ -1,6 +1,7 @@
 <script>
   import { get } from 'svelte/store';
-  import { currentScreen, activeProject, pipelines, pipelinesNext, listState, listError, listFilter, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState } from '../stores/appState.js';
+  import { activeProject, pipelines, pipelinesNext, listState, listError, listFilter, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger } from '../stores/appState.js';
+  import { page, navigateTo } from '../stores/router.js';
   import { listPipelines } from '../stores/api.js';
   import { formatDate, formatDuration, statusLabel, statusClassForState } from './utils.js';
 
@@ -72,15 +73,16 @@
     selectedSteps.set([]);
     selectedVariables.set([]);
     detailState.set('loading');
-    currentScreen.set('detail');
+    navigateTo('detail');
   }
 
   let lastLoaded = ''; // plain variable, NOT reactive — prevents re-entrant loops
 
-  // Load/reload pipelines when project, filter, or sort changes
+  // Load/reload pipelines when project, filter, or sort changes, or on refresh
   $effect(() => {
-    const key = `${$activeProject?.id || ''}:${$listFilter}:${$listSort}`;
-    if (!key || key === '::') return;
+    const key = `${$activeProject?.id || ''}:${$listFilter}:${$listSort}:${$refreshTrigger}`;
+    if (!key || key === ':::') return;
+    if ($page !== 'list') return;
     if (lastLoaded === key) return;
     lastLoaded = key;
     loadPipelines(1);
@@ -105,9 +107,6 @@
         <option value="-created_on">Newest first</option>
         <option value="+created_on">Oldest first</option>
       </select>
-      <button class="btn btn-primary" onclick={() => currentScreen.set('trigger')}>
-        ▶ Run Pipeline
-      </button>
     </div>
   </div>
 
@@ -124,9 +123,6 @@
   {:else if $pipelines.length === 0}
     <div class="empty-pipelines">
       <p>No pipelines found</p>
-      <button class="btn btn-primary" onclick={() => currentScreen.set('trigger')}>
-        Trigger a pipeline
-      </button>
     </div>
   {:else}
     <div class="table-container">
@@ -397,7 +393,7 @@
 
   .status-success { background: #1a3e2a; color: #3fb950; }
   .status-error { background: #3e1a1a; color: #f85149; }
-  .status-running { background: #3e3520; color: #d29922; }
+  .status-running { background: #1d2e3e; color: #6cb6ff; }
   .status-stopped { background: #2f3336; color: #8b949e; }
 
   .result-text {

@@ -1,10 +1,12 @@
 <script>
   import { get } from 'svelte/store';
-  import { currentScreen, activeProjectId, activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logPipeUUID, logStepName, logStepUUID } from '../stores/appState.js';
+  import { activeProjectId, activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logPipeUUID, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
+  import { page, navigateTo } from '../stores/router.js';
   import { getPipeline, listSteps, listVariables, getLogVariables, listRepositories, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState } from './utils.js';
 
   let stopping = $state(false);
+  let running = $state(false);
 
   async function loadDetail() {
     if (!$activeProject || !$selectedPipeline?.uuid) return;
@@ -33,6 +35,21 @@
     }
   }
 
+  function handleRun() {
+    if (!$activeProject || !$selectedPipeline) return;
+    const target = $selectedPipeline.target?.ref_name || $selectedPipeline.target?.type;
+    if (!target) {
+      showError('No target branch found on this pipeline');
+      return;
+    }
+    const variables = ($selectedLogVariables || []).map(v => ({ key: v.key, value: v.value }));
+    const selector = $selectedPipeline.target?.selector || null;
+    triggerPreTarget.set(target);
+    triggerPreSelector.set(selector);
+    triggerPreVars.set(variables);
+    navigateTo('trigger');
+  }
+
   async function handleStop() {
     if (!$activeProject || !$selectedPipeline?.uuid) return;
     if (!confirm('Are you sure you want to stop this pipeline?')) return;
@@ -51,8 +68,8 @@
   let detailLoadedFor = null; // plain variable — prevents effect re-entrance
 
   $effect(() => {
-    if ($currentScreen !== 'detail' || !$activeProject || !$selectedPipeline?.uuid) return;
-    const pipeId = `${$activeProject.id}-${$selectedPipeline.uuid}`;
+    if ($page !== 'detail' || !$activeProject || !$selectedPipeline?.uuid) return;
+    const pipeId = `${$activeProject.id}-${$selectedPipeline.uuid}-${$refreshTrigger}`;
     if (detailLoadedFor === pipeId) return;
     detailLoadedFor = pipeId;
     loadDetail();
@@ -61,10 +78,13 @@
 
 <div class="pipeline-detail">
   <div class="detail-header">
-    <button class="btn btn-secondary" onclick={() => currentScreen.set('list')}>
+    <button class="btn btn-secondary" onclick={() => navigateTo('list')}>
       ← Back to list
     </button>
     <h2>Pipeline #{ $selectedPipeline?.build_number || '—' }</h2>
+    <button class="btn btn-primary" onclick={handleRun} disabled={running}>
+      {running ? '⏳ Running...' : '▶ Run Pipeline'}
+    </button>
     {#if $selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING'}
       <button class="btn btn-danger" onclick={handleStop} disabled={stopping}>
         {stopping ? '⏳ Stopping...' : '⏹ Stop'}
@@ -155,7 +175,7 @@
                     logPipeUUID.set($selectedPipeline.uuid);
                     logStepName.set(step.name || 'Unnamed step');
                     logStepUUID.set(step.uuid);
-                    currentScreen.set('logs');
+                    navigateTo('logs');
                   }}
                 >
                   📜 View Log
@@ -340,7 +360,7 @@
 
   .status-success { background: #1a3e2a; color: #3fb950; }
   .status-error { background: #3e1a1a; color: #f85149; }
-  .status-running { background: #3e3520; color: #d29922; }
+  .status-running { background: #1d2e3e; color: #6cb6ff; }
   .status-stopped { background: #2f3336; color: #8b949e; }
 
   .target-badge {

@@ -1,12 +1,13 @@
 <script>
-  import { currentScreen, projects, activeProjectId, activeProject, notification } from './stores/appState.js';
+  import { projects, activeProjectId, activeProject, notification } from './stores/appState.js';
+  import { page, initRoute, navigateTo } from './stores/router.js';
   import { listProjects } from './stores/api.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
   import PipelineDetail from './lib/PipelineDetail.svelte';
   import PipelineLog from './lib/PipelineLog.svelte';
-  import PipelineTrigger from './lib/PipelineTrigger.svelte';
   import ManageProjects from './lib/ManageProjects.svelte';
+  import PipelineTrigger from './lib/PipelineTrigger.svelte';
   import Notification from './lib/Notification.svelte';
 
   let loading = $state(true);
@@ -22,6 +23,8 @@
       if ((data.projects || []).length > 0) {
         activeProjectId.set(0);
       }
+      // Initialize hash routing to the right default page
+      initRoute((data.projects || []).length > 0);
     } catch (e) {
       console.error('Failed to load projects:', e);
       loadError = e.message || 'Failed to load projects';
@@ -56,15 +59,15 @@
 
     <main class="main-content">
       {#if $activeProject}
-        {#if $currentScreen === 'list'}
+        {#if $page === 'list'}
           <PipelineList />
-        {:else if $currentScreen === 'detail'}
+        {:else if $page === 'detail'}
           <PipelineDetail />
-        {:else if $currentScreen === 'logs'}
+        {:else if $page === 'logs'}
           <PipelineLog />
-        {:else if $currentScreen === 'trigger'}
+        {:else if $page === 'trigger'}
           <PipelineTrigger />
-        {:else if $currentScreen === 'manage'}
+        {:else if $page === 'manage'}
           <ManageProjects />
         {/if}
       {:else}
@@ -72,7 +75,7 @@
           <div class="empty-icon">🚀</div>
           <h2>No Projects Configured</h2>
           <p>Go to Manage Projects to add your first Bitbucket repository.</p>
-          <button class="btn btn-primary" onclick={() => currentScreen.set('manage')}>
+          <button class="btn btn-primary" onclick={() => navigateTo('manage')}>
             Manage Projects
           </button>
         </div>

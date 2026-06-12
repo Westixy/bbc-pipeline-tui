@@ -1,6 +1,7 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { currentScreen, activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logPipeUUID, logStepUUID, showError } from '../stores/appState.js';
+  import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logPipeUUID, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
+  import { navigateTo } from '../stores/router.js';
   import { getStepLog } from '../stores/api.js';
 
   let logState = $state('idle'); // 'idle' | 'loading' | 'ready' | 'error'
@@ -59,10 +60,10 @@
 
   let logLoadedForStep = null; // plain variable — prevents re-entrant loops
 
-  // Auto-load the first step's log on mount
+  // Auto-load the first step's log on mount, and react to refreshTrigger
   $effect(() => {
     if ($selectedSteps.length === 0 || !$selectedSteps[0]?.uuid) return;
-    const stepId = $selectedSteps[0].uuid;
+    const stepId = `${$selectedSteps[0].uuid}-${$refreshTrigger}`;
     if (logLoadedForStep === stepId) return;
     logLoadedForStep = stepId;
     loadLog(0);
@@ -76,7 +77,7 @@
 
 <div class="pipeline-log">
   <div class="log-header">
-    <button class="btn btn-secondary" onclick={() => currentScreen.set('detail')}>
+    <button class="btn btn-secondary" onclick={() => navigateTo('detail')}>
       ← Back to detail
     </button>
     <div class="log-title">

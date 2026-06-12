@@ -1,5 +1,6 @@
 <script>
-  import { currentScreen, projects, activeProject, activeProjectId } from '../stores/appState.js';
+  import { projects, activeProject, activeProjectId, refreshTrigger } from '../stores/appState.js';
+  import { page, navigateTo } from '../stores/router.js';
 
   // Svelte 5: use $derived for computed values
   let projectCount = $derived($projects.length);
@@ -7,7 +8,7 @@
 
 <nav class="navbar">
   <div class="nav-left">
-    <span class="nav-brand" onclick={() => currentScreen.set('list')}>
+    <span class="nav-brand" onclick={() => navigateTo('list')}>
       🚀 BBC Pipeline Manager
     </span>
     {#if projectCount > 0}
@@ -19,26 +20,28 @@
     {#if $activeProject}
       <button
         class="nav-btn"
-        class:active={$currentScreen === 'list'}
-        onclick={() => currentScreen.set('list')}
+        class:active={$page === 'list'}
+        onclick={() => navigateTo('list')}
       >
         📋 Pipelines
-      </button>
-      <button
-        class="nav-btn"
-        class:active={$currentScreen === 'trigger'}
-        onclick={() => currentScreen.set('trigger')}
-      >
-        ▶ Run
       </button>
     {/if}
     <button
       class="nav-btn"
-      class:active={$currentScreen === 'manage'}
-      onclick={() => currentScreen.set('manage')}
+      class:active={$page === 'manage'}
+      onclick={() => navigateTo('manage')}
     >
       ⚙ Manage
     </button>
+    {#if $activeProject}
+      <button
+        class="nav-btn nav-btn-refresh"
+        title="Refresh current view"
+        onclick={() => refreshTrigger.update(n => n + 1)}
+      >
+        🔄 Refresh
+      </button>
+    {/if}
   </div>
 </nav>
 
@@ -107,5 +110,11 @@
   .nav-btn.active {
     background: #2f3336;
     color: #1d9bf0;
+  }
+
+  .nav-btn-refresh {
+    margin-left: 0.5rem;
+    border-left: 1px solid #2f3336;
+    padding-left: 1.25rem;
   }
 </style>

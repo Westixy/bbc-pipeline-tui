@@ -6,10 +6,6 @@ export const activeProjectId = writable(0);
 // List of projects (from /api/projects)
 export const projects = writable([]);
 
-// Current application screen
-// Possible values: 'list', 'detail', 'logs', 'trigger', 'manage'
-export const currentScreen = writable('list');
-
 // Pipeline list state
 export const pipelines = writable([]);
 export const pipelinesNext = writable('');
@@ -35,6 +31,9 @@ export const logStepUUID = writable('');
 export const triggerState = writable('idle');
 export const triggerError = writable('');
 export const triggerSuccess = writable('');
+export const triggerPreTarget = writable('');
+export const triggerPreSelector = writable(null);
+export const triggerPreVars = writable([]);
 
 // Manage projects
 export const workspaceRepos = writable([]);
@@ -45,6 +44,9 @@ export const workspaceReposError = writable('');
 export const activeProject = derived([projects, activeProjectId], ([$projects, $activeProjectId]) => {
   return $projects[$activeProjectId] || null;
 });
+
+// Global refresh trigger (increment to refresh current page)
+export const refreshTrigger = writable(0);
 
 // Error notification
 export const notification = writable(null); // { type: 'error'|'success', message: '' }

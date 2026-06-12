@@ -1,5 +1,6 @@
 <script>
-  import { currentScreen, projects, activeProject, activeProjectId, showError, showSuccess, workspaceRepos, workspaceReposState, workspaceReposError } from '../stores/appState.js';
+  import { projects, activeProject, activeProjectId, showError, showSuccess, workspaceRepos, workspaceReposState, workspaceReposError, refreshTrigger } from '../stores/appState.js';
+  import { navigateTo } from '../stores/router.js';
   import { listProjects, addProject, removeProject, listRepositories } from '../stores/api.js';
 
   let newWorkspace = $state('');
@@ -65,11 +66,24 @@
       removing = null;
     }
   }
+
+  // Reload projects list on refreshTrigger
+  $effect(() => {
+    void $refreshTrigger;
+    (async () => {
+      try {
+        const data = await listProjects();
+        projects.set(data.projects || []);
+      } catch (e) {
+        showError(e.message);
+      }
+    })();
+  });
 </script>
 
 <div class="manage-projects">
   <div class="manage-header">
-    <button class="btn btn-secondary" onclick={() => currentScreen.set($projects.length > 0 ? 'list' : 'manage')}>
+    <button class="btn btn-secondary" onclick={() => navigateTo($projects.length > 0 ? 'list' : 'manage')}>
       ← Back
     </button>
     <h2>Manage Projects</h2>
@@ -94,7 +108,7 @@
             <div class="project-actions">
               <button
                 class="btn btn-small"
-                onclick={() => { activeProjectId.set(i); currentScreen.set('list'); }}
+                onclick={() => { activeProjectId.set(i); navigateTo('list'); }}
               >
                 Select
               </button>
