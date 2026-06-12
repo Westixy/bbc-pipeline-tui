@@ -1,7 +1,7 @@
 <script>
   import './app.css';
   import { projects } from './stores/appState.js';
-  import { page } from './stores/router.js';
+  import { page, initRoute } from './stores/router.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
   import PipelineDetail from './lib/PipelineDetail.svelte';
@@ -14,6 +14,11 @@
 
   $effect(() => {
     document.title = ($projects.length > 0 ? `BBC Pipeline Manager — ${$projects[0]?.name || 'Loading…'}` : 'BBC Pipeline Manager');
+  });
+
+  // Navigate to the correct page once projects are resolved
+  $effect(() => {
+    initRoute($projects.length > 0);
   });
 </script>
 
@@ -58,6 +63,39 @@
         <PipelineTrigger />
       {:else if $page === 'manage'}
         <ManageProjects />
+      {:else}
+        <!-- Landing / loading state when no route matches -->
+        <div class="landing-page">
+          <div class="landing-card">
+            <svg class="landing-icon2" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+            </svg>
+            <h1 class="landing-title">BBC Pipeline Manager</h1>
+            <p class="landing-subtitle">Bitbucket Pipeline management tool</p>
+            {#if $projects.length === 0}
+              <div class="landing-loader">
+                <div class="spinner"></div>
+                <span class="text-tertiary">Loading projects…</span>
+              </div>
+            {:else}
+              <div class="landing-actions">
+                <button class="btn btn-primary" onclick={() => initRoute(true)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  View Pipelines
+                </button>
+                <button class="btn btn-secondary" onclick={() => initRoute(false)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                  Manage Projects
+                </button>
+              </div>
+            {/if}
+          </div>
+        </div>
       {/if}
     </main>
   </div>
@@ -207,5 +245,56 @@
   .status-dot-active {
     background: #fff;
     box-shadow: 0 0 4px rgba(255,255,255,0.5);
+  }
+
+  /* ── Landing Page ──────────────────────────────────────── */
+  .landing-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: var(--space-8);
+  }
+
+  .landing-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    text-align: center;
+    max-width: 380px;
+  }
+
+  .landing-icon2 {
+    color: var(--accent);
+    opacity: 0.7;
+    margin-bottom: var(--space-2);
+  }
+
+  .landing-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+
+  .landing-subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    margin: 0;
+  }
+
+  .landing-loader {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .landing-actions {
+    display: flex;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
   }
 </style>

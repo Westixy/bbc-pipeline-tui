@@ -1,6 +1,6 @@
 <script>
   import { get } from 'svelte/store';
-  import { activeProject, pipelines, pipelinesNext, listState, listError, listFilter, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger } from '../stores/appState.js';
+  import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
   import { listPipelines } from '../stores/api.js';
   import { formatDate, formatDuration, statusLabel } from './utils.js';
@@ -8,7 +8,6 @@
   let root = $state(null);
   let loading = $state(false);
   let loadingMore = $state(false);
-  let searchTimeout = $state(null);
   let localFilter = $state('');
   let currentPage = $state(1);
   let hasMore = $state(false);
@@ -17,6 +16,27 @@
 
   // Sentinel element ref for IntersectionObserver
   let sentinel = $state(null);
+
+  // ── Computed: locally filtered pipelines ───────────────────────────
+  let displayedPipelines = $derived.by(() => {
+    const list = $pipelines;
+    const filter = localFilter.trim().toLowerCase();
+    if (!filter) return list;
+    return list.filter(p => {
+      // Search across multiple fields
+      if (String(p.build_number || '').includes(filter)) return true;
+      if ((p.target?.ref_name || '').toLowerCase().includes(filter)) return true;
+      if ((p.target?.commit?.hash || '').toLowerCase().includes(filter)) return true;
+      if (statusLabel(p.state).toLowerCase().includes(filter)) return true;
+      if ((p.creator?.display_name || p.creator?.username || '').toLowerCase().includes(filter)) return true;
+      if ((p.trigger?.name || '').toLowerCase().includes(filter)) return true;
+      if ((p.target?.selector?.pattern || '').toLowerCase().includes(filter)) return true;
+      if (formatDate(p.created_on).toLowerCase().includes(filter)) return true;
+      return false;
+    });
+  });
+
+  let isFiltering = $derived(localFilter.trim().length > 0);
 
   /** Load the first page of pipelines, fully replacing the list. */
   async function loadPipelinesFirst() {
@@ -27,8 +47,8 @@
     currentPage = 1;
     hasMore = false;
     try {
+      // No filter sent to server — filtering happens client-side
       const data = await listPipelines($activeProject.id, {
-        filter: get(listFilter),
         sort: get(listSort),
         page: 1,
       });
@@ -52,7 +72,6 @@
     const nextPage = currentPage + 1;
     try {
       const data = await listPipelines($activeProject.id, {
-        filter: get(listFilter),
         sort: get(listSort),
         page: nextPage,
       });
@@ -67,16 +86,8 @@
     }
   }
 
-  function handleFilterInput() {
-    if (searchTimeout) clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => {
-      listFilter.set(localFilter);
-    }, 400);
-  }
-
   function clearFilter() {
     localFilter = '';
-    listFilter.set('');
   }
 
   function viewDetail(pipeline) {
@@ -103,10 +114,18 @@
     return hash.substring(0, 7);
   }
 
+  function triggerLabel(trigger) {
+    const name = (trigger?.name || '').toLowerCase();
+    if (name === 'push') return 'push';
+    if (name === 'manual') return 'manual';
+    if (name === 'schedule' || name === 'scheduled') return 'schedule';
+    if (name === 'pull_request' || name === 'pullrequest') return 'PR';
+    return trigger?.name || '—';
+  }
+
   let lastLoaded = '';
   let selectedIndex = $state(null);
   let gridBody = $state(null);
-  let scrollTopBtn = $state(null);
 
   // ── Infinite-scroll IntersectionObserver ──────────────────────────────
   $effect(() => {
@@ -116,7 +135,8 @@
       for (const entry of entries) {
         sentinelVisible = entry.isIntersecting;
       }
-      if (sentinelVisible && hasMore && !loadingMore) {
+      // Only trigger load if not filtering (filtering is client-side only)
+      if (sentinelVisible && hasMore && !loadingMore && !isFiltering) {
         loadPipelinesNext();
       }
     }, { rootMargin: '200px' });
@@ -126,8 +146,8 @@
 
   // ── Reactive data loading ────────────────────────────────────────────
   $effect(() => {
-    const key = `${$activeProject?.id || ''}:${$listFilter}:${$listSort}:${$refreshTrigger}`;
-    if (!key || key === ':::') return;
+    const key = `${$activeProject?.id || ''}:${$listSort}:${$refreshTrigger}`;
+    if (!key || key === '::' || key === ':') return;
     if ($page !== 'list') return;
     if (lastLoaded === key) return;
     lastLoaded = key;
@@ -157,7 +177,7 @@
   function handleRowKeydown(e, index) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      const next = Math.min(index + 1, $pipelines.length - 1);
+      const next = Math.min(index + 1, displayedPipelines.length - 1);
       selectedIndex = next;
       document.querySelector(`[data-row-index="${next}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     } else if (e.key === 'ArrowUp') {
@@ -167,7 +187,7 @@
       document.querySelector(`[data-row-index="${prev}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      const pipe = $pipelines[index];
+      const pipe = displayedPipelines[index];
       if (pipe) viewDetail(pipe);
     }
   }
@@ -181,9 +201,12 @@
         {$activeProject?.name || 'Unknown'}
       </h2>
       <span class="toolbar-count">
-        <span class="mono">{$pipelines.length}</span>
-        {#if hasMore}<span class="count-suffix">+</span>{/if}
+        <span class="mono">{isFiltering ? displayedPipelines.length : $pipelines.length}</span>
+        {#if hasMore && !isFiltering}<span class="count-suffix">+</span>{/if}
         <span class="count-label"> pipeline{$pipelines.length !== 1 ? 's' : ''}</span>
+        {#if isFiltering}
+          <span class="count-filtered"> of {$pipelines.length}</span>
+        {/if}
       </span>
     </div>
     <div class="toolbar-right">
@@ -195,9 +218,8 @@
         <input
           type="text"
           class="form-input search-input"
-          placeholder="Filter by branch, status, #number…"
+          placeholder="Filter locally — branch, status, #, trigger…"
           bind:value={localFilter}
-          oninput={handleFilterInput}
         />
         {#if localFilter}
           <button class="search-clear" onclick={clearFilter} title="Clear filter (Esc)">×</button>
@@ -214,10 +236,12 @@
   {#if $listState === 'loading' && $pipelines.length === 0}
     <div class="panel skeleton-panel">
       <div class="data-grid-header">
-        <div class="data-grid-cell col-build" aria-hidden="true">BUILD</div>
+        <div class="data-grid-cell col-build" aria-hidden="true">#</div>
         <div class="data-grid-cell col-branch" aria-hidden="true">TARGET</div>
+        <div class="data-grid-cell col-sel" aria-hidden="true">PIPELINE</div>
+        <div class="data-grid-cell col-trig" aria-hidden="true">VIA</div>
         <div class="data-grid-cell col-status-hdr" aria-hidden="true">STATUS</div>
-        <div class="data-grid-cell col-dur" aria-hidden="true">DURATION</div>
+        <div class="data-grid-cell col-dur" aria-hidden="true">DUR</div>
         <div class="data-grid-cell col-creator" aria-hidden="true">CREATOR</div>
         <div class="data-grid-cell col-date" aria-hidden="true">CREATED</div>
       </div>
@@ -225,6 +249,8 @@
         <div class="data-grid-row skeleton-row">
           <div class="data-grid-cell col-build"><div class="skeleton sk-num"></div></div>
           <div class="data-grid-cell col-branch"><div class="skeleton sk-branch"></div></div>
+          <div class="data-grid-cell col-sel"><div class="skeleton sk-sel"></div></div>
+          <div class="data-grid-cell col-trig"><div class="skeleton sk-trig"></div></div>
           <div class="data-grid-cell col-status-hdr"><div class="skeleton sk-badge"></div></div>
           <div class="data-grid-cell col-dur"><div class="skeleton sk-dur"></div></div>
           <div class="data-grid-cell col-creator"><div class="skeleton sk-name"></div></div>
@@ -244,31 +270,33 @@
       </button>
     </div>
 
-  <!-- ── Empty state ────────────────────────────────────── -->
+  <!-- ── Empty state (no pipelines from server) ─────────── -->
   {:else if $listState === 'ready' && $pipelines.length === 0}
-    {#if $listFilter}
-      <div class="empty-state">
-        <div class="empty-icon">∅</div>
-        <h3>No matching pipelines</h3>
-        <p>No pipelines match filter <code>{$listFilter}</code></p>
-        <button class="btn btn-secondary" onclick={clearFilter}>Clear filter</button>
-      </div>
-    {:else}
-      <div class="empty-state">
-        <div class="empty-icon">∅</div>
-        <h3>No pipelines</h3>
-        <p>No pipeline runs have been found for this repository.</p>
-      </div>
-    {/if}
+    <div class="empty-state">
+      <div class="empty-icon">∅</div>
+      <h3>No pipelines</h3>
+      <p>No pipeline runs have been found for this repository.</p>
+    </div>
+
+  <!-- ── Empty filter state ─────────────────────────────── -->
+  {:else if $listState === 'ready' && isFiltering && displayedPipelines.length === 0}
+    <div class="empty-state">
+      <div class="empty-icon">∅</div>
+      <h3>No matching pipelines</h3>
+      <p>No pipelines in the list match <code>{localFilter}</code></p>
+      <button class="btn btn-secondary" onclick={clearFilter}>Clear filter</button>
+    </div>
 
   <!-- ── Data grid with infinite scroll ──────────────────── -->
   {:else}
     <div class="panel data-grid">
       <div class="data-grid-header">
-        <div class="data-grid-cell col-build">BUILD</div>
+        <div class="data-grid-cell col-build">#</div>
         <div class="data-grid-cell col-branch">TARGET</div>
+        <div class="data-grid-cell col-sel">PIPELINE</div>
+        <div class="data-grid-cell col-trig">VIA</div>
         <div class="data-grid-cell col-status-hdr">STATUS</div>
-        <div class="data-grid-cell col-dur">DURATION</div>
+        <div class="data-grid-cell col-dur">DUR</div>
         <div class="data-grid-cell col-creator">CREATOR</div>
         <div class="data-grid-cell col-date">CREATED</div>
       </div>
@@ -280,7 +308,7 @@
         role="grid"
         aria-label="Pipelines list"
       >
-        {#each $pipelines as pipe, index}
+        {#each displayedPipelines as pipe, index}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="data-grid-row"
@@ -294,13 +322,26 @@
             onkeydown={(e) => handleRowKeydown(e, index)}
           >
             <div class="data-grid-cell col-build">
-              <span class="mono" class:text-tertiary={true}>#{pipe.build_number || '—'}</span>
+              <span class="mono build-num">#{pipe.build_number || '—'}</span>
             </div>
             <div class="data-grid-cell col-branch">
               <span class="branch-ref" title={pipe.target?.ref_name}>{pipe.target?.ref_name || '—'}</span>
               {#if pipe.target?.commit?.hash}
                 <span class="commit-tag" title={pipe.target.commit.hash}>{shortHash(pipe.target.commit.hash)}</span>
               {/if}
+            </div>
+            <div class="data-grid-cell col-sel">
+              {#if pipe.target?.selector?.pattern}
+                <span class="selector-tag" title={pipe.target.selector.pattern}>{pipe.target.selector.pattern}</span>
+              {:else}
+                <span class="text-tertiary">default</span>
+              {/if}
+            </div>
+            <div class="data-grid-cell col-trig">
+              <span class="trigger-tag" class:trigger-push={pipe.trigger?.name?.toLowerCase() === 'push'}
+                class:trigger-manual={pipe.trigger?.name?.toLowerCase() === 'manual'}
+                class:trigger-schedule={pipe.trigger?.name?.toLowerCase() === 'schedule' || pipe.trigger?.name?.toLowerCase() === 'scheduled'}
+              >{triggerLabel(pipe.trigger)}</span>
             </div>
             <div class="data-grid-cell col-status-hdr">
               <span class="badge {statusToBadgeClass(pipe.state)}" class:badge-animated={pipe.state?.name === 'IN_PROGRESS'}>{statusLabel(pipe.state)}</span>
@@ -317,19 +358,25 @@
           </div>
         {/each}
 
-        <!-- Infinite-scroll sentinel -->
-        <div class="scroll-sentinel" bind:this={sentinel}>
-          {#if loadingMore}
-            <div class="load-more-hint">
-              <span class="spinner"></span>
-              <span class="text-tertiary">Loading more…</span>
-            </div>
-          {:else if hasMore}
-            <div class="load-more-hint text-tertiary">Scroll for more</div>
-          {:else if $pipelines.length >= 50}
-            <div class="load-more-hint"><span class="dot"></span> All pipelines loaded</div>
-          {/if}
-        </div>
+        <!-- Infinite-scroll sentinel (hidden when filtering) -->
+        {#if !isFiltering}
+          <div class="scroll-sentinel" bind:this={sentinel}>
+            {#if loadingMore}
+              <div class="load-more-hint">
+                <span class="spinner"></span>
+                <span class="text-tertiary">Loading more…</span>
+              </div>
+            {:else if hasMore}
+              <div class="load-more-hint text-tertiary">Scroll for more</div>
+            {:else if $pipelines.length >= 50}
+              <div class="load-more-hint"><span class="dot"></span> All pipelines loaded</div>
+            {/if}
+          </div>
+        {:else}
+          <div class="scroll-sentinel filter-hint">
+            <span class="text-tertiary">Filter active — showing {displayedPipelines.length} of {$pipelines.length} pipelines</span>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -408,6 +455,10 @@
   .count-label {
     color: var(--text-tertiary);
   }
+  .count-filtered {
+    color: var(--accent-text);
+    font-weight: 500;
+  }
 
   .toolbar-right {
     display: flex;
@@ -430,7 +481,7 @@
   }
   .search-input {
     padding-left: 28px !important;
-    width: 210px;
+    width: 230px;
   }
   .search-clear {
     position: absolute;
@@ -520,13 +571,20 @@
     line-height: 1.3;
   }
 
-  /* Column widths */
-  .col-build      { width: 64px;   flex-shrink: 0; }
-  .col-branch     { width: 190px;  flex-shrink: 0; }
-  .col-status-hdr { width: 96px;   flex-shrink: 0; }
-  .col-dur        { width: 80px;   flex-shrink: 0; justify-content: flex-end; padding-right: var(--space-6); }
-  .col-creator    { flex: 1; min-width: 80px; }
-  .col-date       { width: 142px;  flex-shrink: 0; }
+  /* Column widths — use rem so header (10px) and data (12px) cells align */
+  .col-build      { flex: 0 0 3.2rem; }
+  .col-branch     { flex: 1 1 11rem;   min-width: 7.5rem;  max-width: 20rem; }
+  .col-sel        { flex: 1 1 8.5rem;  min-width: 5.5rem;  max-width: 13rem; }
+  .col-trig       { flex: 0 0 5rem;    justify-content: center; }
+  .col-status-hdr { flex: 0 0 6.5rem; }
+  .col-dur        { flex: 0 0 5.5rem;  justify-content: flex-end; }
+  .col-creator    { flex: 1 1 7rem;    min-width: 5.5rem; }
+  .col-date       { flex: 0 0 9rem;    white-space: nowrap; }
+
+  .build-num {
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
 
   .branch-ref {
     font-family: var(--font-mono);
@@ -546,6 +604,42 @@
     border-radius: var(--radius-sm);
     flex-shrink: 0;
     letter-spacing: 0.02em;
+  }
+
+  .selector-tag {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    background: var(--bg-input);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 92px;
+  }
+
+  .trigger-tag {
+    font-size: 10.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    background: var(--bg-input);
+  }
+  .trigger-push {
+    color: var(--accent-text);
+    background: var(--accent-muted);
+  }
+  .trigger-manual {
+    color: var(--warning);
+    background: var(--warning-bg);
+  }
+  .trigger-schedule {
+    color: var(--success);
+    background: var(--success-bg);
   }
 
   /* Animated badge for running pipelines */
@@ -580,6 +674,11 @@
     background: var(--text-tertiary);
   }
 
+  .filter-hint {
+    background: var(--bg-hover);
+    border-top: 1px dashed var(--border-default);
+  }
+
   /* ── Scroll-to-top ──────────────────────────────────────────── */
   .scroll-top-btn {
     position: absolute;
@@ -608,12 +707,14 @@
   }
   .skeleton-row:hover { background: transparent !important; cursor: default; }
 
-  .sk-num    { width: 32px;  height: 12px; }
-  .sk-branch { width: 100px; height: 12px; }
-  .sk-badge  { width: 56px;  height: 12px; }
-  .sk-dur    { width: 44px;  height: 12px; margin-left: auto; }
-  .sk-name   { width: 64px;  height: 12px; }
-  .sk-date   { width: 88px;  height: 12px; }
+  .sk-num    { width: 28px;  height: 12px; }
+  .sk-branch { width: 90px;  height: 12px; }
+  .sk-sel    { width: 56px;  height: 12px; }
+  .sk-trig   { width: 40px;  height: 12px; }
+  .sk-badge  { width: 50px;  height: 12px; }
+  .sk-dur    { width: 36px;  height: 12px; margin-left: auto; }
+  .sk-name   { width: 60px;  height: 12px; }
+  .sk-date   { width: 80px;  height: 12px; }
 
   /* ── Loading indicator bar ──────────────────────────────────── */
   .loading-indicator {

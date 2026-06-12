@@ -16,7 +16,10 @@
   let showStopConfirm = $state(false);
   let copiedHash = $state(false);
   let elapsed = $state('');
-  let varsTab = $state('pipeline'); // 'pipeline' | 'log'
+  let varsTab = $state('log'); // 'log' | 'pipeline' — prefer parsed log variables
+  let varsFilter = $state('');
+  let showAllVars = $state(false);
+  const VARS_PREVIEW_COUNT = 6;
 
   function updateElapsed() {
     const pipe = $selectedPipeline;
@@ -187,6 +190,29 @@
   let completedSteps = $derived($selectedSteps.filter(s => s.state?.name === 'SUCCESSFUL' || s.state?.name === 'FAILED' || s.state?.name === 'STOPPED').length);
   let totalSteps = $derived($selectedSteps.length);
   let pipelineRunning = $derived($selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING');
+
+  // Default to log variables if they exist, fall back to pipeline variables
+  let effectiveVarsTab = $derived.by(() => {
+    if (varsTab === 'log' && hasLogVars) return 'log';
+    if (varsTab === 'pipeline' && hasPipelineVars) return 'pipeline';
+    if (hasLogVars) return 'log';
+    if (hasPipelineVars) return 'pipeline';
+    return 'log'; // irrelevant when empty
+  });
+  let currentVars = $derived(effectiveVarsTab === 'pipeline' ? $selectedVariables : $selectedLogVariables);
+  let hasPipelineVars = $derived($selectedVariables.length > 0);
+  let hasLogVars = $derived($selectedLogVariables.length > 0);
+  let hasAnyVars = $derived(hasPipelineVars || hasLogVars);
+
+  let filteredVars = $derived.by(() => {
+    const filter = varsFilter.trim().toLowerCase();
+    const vars = currentVars;
+    if (!filter) return vars;
+    return vars.filter(v => v.key.toLowerCase().includes(filter) || (v.value || '').toLowerCase().includes(filter));
+  });
+
+  let displayedVars = $derived(showAllVars ? filteredVars : filteredVars.slice(0, VARS_PREVIEW_COUNT));
+  let hasMoreVars = $derived(filteredVars.length > VARS_PREVIEW_COUNT && !showAllVars);
 </script>
 
 <div class="pipeline-detail">
@@ -327,128 +353,168 @@
       </div>
     {/if}
 
-    <!-- Steps Table ───────────────────────────────────────── -->
-    <div class="panel steps-panel">
-      <div class="panel-header">
-        <h3>Steps</h3>
-        <span class="badge badge-neutral">{$selectedSteps.length}</span>
-      </div>
-      {#if $selectedSteps.length === 0}
-        <p class="empty-text">No steps found for this pipeline.</p>
-      {:else}
-        <div class="steps-table">
-          <div class="steps-header">
-            <div class="col-dot"></div>
-            <div class="col-name">STEP</div>
-            <div class="col-status">STATUS</div>
-            <div class="col-duration">DURATION</div>
-            <div class="col-actions">LOG</div>
+    <!-- Two-Column Layout: Steps + Variables ──────────────── -->
+    <div class="detail-panels">
+      <!-- Left Column: Steps ───────────────────────────────── -->
+      <div class="panel steps-panel">
+        <div class="panel-header">
+          <h3>Steps</h3>
+          <span class="badge badge-neutral">{$selectedSteps.length}</span>
+        </div>
+        {#if $selectedSteps.length === 0}
+          <p class="empty-text">No steps found for this pipeline.</p>
+        {:else}
+          <div class="steps-table">
+            <div class="steps-header">
+              <div class="col-dot"></div>
+              <div class="col-name">STEP</div>
+              <div class="col-status">STATUS</div>
+              <div class="col-duration">DURATION</div>
+              <div class="col-actions">LOG</div>
+            </div>
+            <div class="steps-body">
+              {#each $selectedSteps as step, i}
+                <div
+                  class="step-row"
+                  class:step-row-active={step.state?.name === 'IN_PROGRESS'}
+                  class:step-row-failed={step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
+                >
+                  <div class="col-dot">
+                    <span class="step-dot {stepDotClass(step.state)}"></span>
+                  </div>
+                  <div class="col-name" title={step.name}>
+                    <span class="step-name-text">{step.name || `Step ${i + 1}`}</span>
+                  </div>
+                  <div class="col-status">
+                    <span class="badge {stepStatusBadgeClass(step.state)} step-badge">{statusLabel(step.state)}</span>
+                  </div>
+                  <div class="col-duration">
+                    {#if step.duration_in_seconds != null}
+                      <span class="duration-primary" title="Wall duration">⏱ {formatDurationCompact(step.duration_in_seconds || 0)}</span>
+                    {/if}
+                    {#if step.run_duration_in_seconds != null}
+                      <span class="duration-secondary" title="Run duration">▶ {formatDurationCompact(step.run_duration_in_seconds || 0)}</span>
+                    {/if}
+                    {#if step.build_duration_in_seconds != null}
+                      <span class="duration-secondary" title="Build duration">⚙ {formatDurationCompact(step.build_duration_in_seconds || 0)}</span>
+                    {/if}
+                    {#if step.duration_in_seconds == null && step.run_duration_in_seconds == null && step.build_duration_in_seconds == null}
+                      <span class="text-tertiary">—</span>
+                    {/if}
+                  </div>
+                  <div class="col-actions">
+                    {#if step.state?.name !== 'NOT_STARTED'}
+                      <button
+                        class="btn btn-secondary btn-xs"
+                        onclick={() => {
+                          logStepName.set(step.name || `Step ${i + 1}`);
+                          logStepUUID.set(step.uuid);
+                          navigateTo('logs', $selectedPipeline.uuid, i);
+                        }}
+                      >
+                        Log
+                      </button>
+                    {:else}
+                      <span class="text-tertiary text-xs">—</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
           </div>
-          <div class="steps-body">
-            {#each $selectedSteps as step, i}
-              <div
-                class="step-row"
-                class:step-row-active={step.state?.name === 'IN_PROGRESS'}
-                class:step-row-failed={step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
-              >
-                <div class="col-dot">
-                  <span class="step-dot {stepDotClass(step.state)}"></span>
-                </div>
-                <div class="col-name" title={step.name}>
-                  <span class="step-name-text">{step.name || `Step ${i + 1}`}</span>
-                </div>
-                <div class="col-status">
-                  <span class="badge {stepStatusBadgeClass(step.state)} step-badge">{statusLabel(step.state)}</span>
-                </div>
-                <div class="col-duration">
-                  {#if step.duration_in_seconds != null}
-                    <span class="duration-primary" title="Wall duration">⏱ {formatDurationCompact(step.duration_in_seconds || 0)}</span>
-                  {/if}
-                  {#if step.run_duration_in_seconds != null}
-                    <span class="duration-secondary" title="Run duration">▶ {formatDurationCompact(step.run_duration_in_seconds || 0)}</span>
-                  {/if}
-                  {#if step.build_duration_in_seconds != null}
-                    <span class="duration-secondary" title="Build duration">⚙ {formatDurationCompact(step.build_duration_in_seconds || 0)}</span>
-                  {/if}
-                  {#if step.duration_in_seconds == null && step.run_duration_in_seconds == null && step.build_duration_in_seconds == null}
-                    <span class="text-tertiary">—</span>
-                  {/if}
-                </div>
-                <div class="col-actions">
-                  {#if step.state?.name !== 'NOT_STARTED'}
-                    <button
-                      class="btn btn-secondary btn-xs"
-                      onclick={() => {
-                        logStepName.set(step.name || `Step ${i + 1}`);
-                        logStepUUID.set(step.uuid);
-                        navigateTo('logs', $selectedPipeline.uuid, i);
-                      }}
-                    >
-                      Log
-                    </button>
-                  {:else}
-                    <span class="text-tertiary text-xs">—</span>
-                  {/if}
-                </div>
+        {/if}
+      </div>
+
+      <!-- Right Column: Variables ──────────────────────────── -->
+      {#if hasAnyVars}
+        <div class="panel vars-panel">
+          <div class="panel-header vars-panel-header">
+            <h3>Variables</h3>
+            <div class="vars-tabs-segmented">
+              {#if hasLogVars}
+                <button
+                  class="vars-tab-segment"
+                  class:active={effectiveVarsTab === 'log'}
+                  onclick={() => (varsTab = 'log')}
+                >
+                  Log
+                  <span class="tab-count">{$selectedLogVariables.length}</span>
+                </button>
+              {/if}
+              {#if hasPipelineVars}
+                <button
+                  class="vars-tab-segment"
+                  class:active={effectiveVarsTab === 'pipeline'}
+                  onclick={() => (varsTab = 'pipeline')}
+                >
+                  Pipeline
+                  <span class="tab-count">{$selectedVariables.length}</span>
+                </button>
+              {/if}
+            </div>
+          </div>
+          <div class="vars-body">
+            {#if effectiveVarsTab === 'log' && hasLogVars}
+              <p class="vars-hint">Parsed from "Pipeline variables:" block in the first step's log.</p>
+            {/if}
+
+            {#if currentVars.length > VARS_PREVIEW_COUNT}
+              <div class="vars-search">
+                <svg class="search-icon-sm" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  class="vars-search-input"
+                  placeholder="Filter variables…"
+                  bind:value={varsFilter}
+                />
               </div>
-            {/each}
+            {/if}
+
+            {#if filteredVars.length === 0}
+              <p class="empty-text">No variables match <code>{varsFilter}</code></p>
+            {:else}
+              <div class="vars-list">
+                {#each displayedVars as v}
+                  <div class="var-row">
+                    <div class="var-row-left">
+                      <code class="var-key">{v.key}</code>
+                      {#if v.secured}
+                        <span class="secured-tag">SECURED</span>
+                      {/if}
+                    </div>
+                    <span class="var-value" class:var-value-masked={v.secured}>
+                      {v.secured ? '••••••••••••••••' : (v.value || '(empty)')}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+
+              {#if hasMoreVars}
+                <button class="vars-show-more" onclick={() => (showAllVars = true)}>
+                  Show all {filteredVars.length} variables…
+                </button>
+              {/if}
+              {#if showAllVars && filteredVars.length > VARS_PREVIEW_COUNT}
+                <button class="vars-show-more" onclick={() => (showAllVars = false)}>
+                  Show fewer
+                </button>
+              {/if}
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <div class="panel vars-panel vars-panel-empty">
+          <div class="panel-header">
+            <h3>Variables</h3>
+          </div>
+          <div class="vars-body">
+            <p class="empty-text">No variables available for this pipeline.</p>
           </div>
         </div>
       {/if}
     </div>
-
-    <!-- Variables Panel ───────────────────────────────────── -->
-    {#if $selectedVariables.length > 0 || $selectedLogVariables.length > 0}
-      <div class="panel vars-panel">
-        <div class="panel-header vars-tabs">
-          {#if $selectedVariables.length > 0}
-            <button
-              class="vars-tab"
-              class:active={varsTab === 'pipeline'}
-              onclick={() => (varsTab = 'pipeline')}
-            >
-              Pipeline Variables
-              <span class="badge badge-neutral">{$selectedVariables.length}</span>
-            </button>
-          {/if}
-          {#if $selectedLogVariables.length > 0}
-            <button
-              class="vars-tab"
-              class:active={varsTab === 'log'}
-              onclick={() => (varsTab = 'log')}
-            >
-              Log Variables
-              <span class="badge badge-neutral">{$selectedLogVariables.length}</span>
-            </button>
-          {/if}
-        </div>
-        <div class="panel-body">
-          {#if varsTab === 'pipeline' && $selectedVariables.length > 0}
-            <div class="vars-grid">
-              {#each $selectedVariables as v}
-                <div class="var-row">
-                  <code class="var-key">{v.key}</code>
-                  <span class="var-value">{v.secured ? '••••••••' : (v.value || '(empty)')}</span>
-                  {#if v.secured}
-                    <span class="secured-tag">secured</span>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {:else if varsTab === 'log' && $selectedLogVariables.length > 0}
-            <p class="vars-hint">Parsed from "Pipeline variables:" block in the first step's log.</p>
-            <div class="vars-grid">
-              {#each $selectedLogVariables as v}
-                <div class="var-row">
-                  <code class="var-key">{v.key}</code>
-                  <span class="var-value">{v.value || '(empty)'}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
   {/if}
 </div>
 
@@ -705,10 +771,20 @@
     font-family: var(--font-mono);
   }
 
-  /* ── Steps Table ────────────────────────────────────────── */
-  .steps-panel {
-    margin: 0 var(--space-6);
+  /* ── Two-Column Detail Panels ───────────────────────────── */
+  .detail-panels {
+    display: flex;
+    gap: var(--space-5);
+    padding: var(--space-4) var(--space-6);
     flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── Steps Table (left column) ──────────────────────────── */
+  .steps-panel {
+    flex: 1;
+    min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -835,69 +911,173 @@
     padding: var(--space-5);
   }
 
-  /* ── Variables Panel ────────────────────────────────────── */
+  /* ── Variables Panel (right column) ─────────────────────── */
   .vars-panel {
-    margin: var(--space-5) var(--space-6);
+    width: 320px;
+    flex-shrink: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border-default);
+  }
+  .vars-panel-empty {
+    opacity: 0.5;
+  }
+
+  .vars-panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    background: var(--bg-panel-raised);
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    user-select: none;
     flex-shrink: 0;
   }
-
-  .vars-tabs {
-    display: flex;
-    gap: var(--space-1);
-    padding: var(--space-1);
-    background: var(--bg-input);
-    border-radius: var(--radius-md);
-    width: fit-content;
+  .vars-panel-header h3 {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0;
   }
 
-  .vars-tab {
+  .vars-tabs-segmented {
+    display: flex;
+    gap: 0;
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    padding: 2px;
+    width: 100%;
+  }
+
+  .vars-tab-segment {
+    flex: 1;
     display: flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-5);
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
     border-radius: var(--radius-sm);
     border: none;
     background: transparent;
     color: var(--text-tertiary);
     font-family: var(--font-ui);
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     font-weight: 500;
     cursor: pointer;
     transition: all var(--transition-fast);
+    white-space: nowrap;
   }
-  .vars-tab:hover { color: var(--text-primary); }
-  .vars-tab.active {
+  .vars-tab-segment:hover { color: var(--text-primary); }
+  .vars-tab-segment.active {
     background: var(--bg-panel);
     color: var(--text-primary);
     box-shadow: 0 1px 3px rgba(0,0,0,0.12);
     font-weight: 600;
   }
+  .tab-count {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--bg-badge);
+    color: var(--text-tertiary);
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+  }
 
-  .vars-grid {
+  .vars-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
-    max-height: 240px;
+    gap: var(--space-2);
+  }
+
+  .vars-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    font-style: italic;
+    margin: 0;
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .vars-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .search-icon-sm {
+    position: absolute;
+    left: 7px;
+    color: var(--text-tertiary);
+    pointer-events: none;
+  }
+  .vars-search-input {
+    width: 100%;
+    padding: var(--space-1) var(--space-3) var(--space-1) 26px;
+    font-family: var(--font-ui);
+    font-size: var(--font-size-xs);
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    outline: none;
+  }
+  .vars-search-input:focus { border-color: var(--border-focus); }
+  .vars-search-input::placeholder { color: var(--text-tertiary); }
+
+  .vars-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
     overflow-y: auto;
+    min-height: 0;
   }
 
   .var-row {
     display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: var(--space-1) var(--space-4);
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-sm);
-    flex-wrap: wrap;
+    background: var(--bg-panel);
+    transition: background var(--transition-fast);
   }
   .var-row:hover { background: var(--bg-hover); }
+
+  .var-row-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
 
   .var-key {
     font-family: var(--font-mono);
     font-size: var(--font-size-xs);
+    font-weight: 600;
     color: var(--accent-text);
     background: var(--accent-muted);
     padding: 1px 6px;
     border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  .secured-tag {
+    font-size: 9px;
+    color: var(--warning);
+    background: var(--warning-bg);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     flex-shrink: 0;
   }
 
@@ -906,24 +1086,33 @@
     font-size: var(--font-size-xs);
     color: var(--text-primary);
     word-break: break-all;
-    flex: 1;
-    min-width: 0;
+    line-height: 1.5;
+    padding-left: var(--space-2);
+  }
+  .var-value-masked {
+    color: var(--text-tertiary);
+    letter-spacing: 0.15em;
   }
 
-  .secured-tag {
-    font-size: 10px;
-    color: #c69000;
-    background: #fff3cd;
-    padding: 1px 5px;
+  .vars-show-more {
+    display: block;
+    width: 100%;
+    padding: var(--space-2);
+    border: 1px dashed var(--border-default);
     border-radius: var(--radius-sm);
-    font-weight: 600;
+    background: transparent;
+    color: var(--accent-text);
+    font-family: var(--font-ui);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: all var(--transition-fast);
     flex-shrink: 0;
   }
-
-  .vars-hint {
-    font-size: var(--font-size-xs);
-    color: var(--text-tertiary);
-    font-style: italic;
-    margin: 0 0 var(--space-3) 0;
+  .vars-show-more:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-text);
+    color: var(--accent-text);
   }
 </style>
