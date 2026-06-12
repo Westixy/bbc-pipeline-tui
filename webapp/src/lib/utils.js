@@ -61,7 +61,7 @@ export function statusLabel(state) {
  * Considers both state.name and state.result for COMPLETED pipelines.
  */
 export function statusClassForState(state) {
-  if (!state) return 'status-error';
+  if (!state) return 'status-pending';
   const name = (state.name || '').toLowerCase();
   if (name === 'completed') {
     const result = (state.result?.name || '').toLowerCase();
@@ -70,7 +70,9 @@ export function statusClassForState(state) {
     return 'status-success';
   }
   if (name === 'failed' || name === 'error') return 'status-error';
-  if (name === 'in_progress' || name === 'pending') return 'status-running';
+  if (name === 'in_progress') return 'status-running';
+  if (name === 'pending') return 'status-pending';
+  if (name === 'not_started') return 'status-pending';
   if (name === 'stopped') return 'status-stopped';
-  return 'status-error';
+  return 'status-pending';
 }

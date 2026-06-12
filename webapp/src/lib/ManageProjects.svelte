@@ -2,6 +2,7 @@
   import { projects, activeProject, activeProjectId, showError, showSuccess, workspaceRepos, workspaceReposState, workspaceReposError, refreshTrigger } from '../stores/appState.js';
   import { navigateTo } from '../stores/router.js';
   import { listProjects, addProject, removeProject, listRepositories } from '../stores/api.js';
+  import ConfirmModal from './ConfirmModal.svelte';
 
   let newWorkspace = $state('');
   let newRepoSlug = $state('');
@@ -11,6 +12,7 @@
   let highlightedIdx = $state(-1);
   let searchLoading = $state(false);
   let debounceTimer = null;
+  let removeConfirm = $state(null); // { id, name }
 
   let suggestions = $derived.by(() => {
     if (!$workspaceRepos || $workspaceRepos.length === 0) return [];
@@ -132,8 +134,14 @@
     }
   }
 
-  async function handleRemove(projId) {
-    if (!confirm('Are you sure you want to remove this project?')) return;
+  function promptRemove(proj) {
+    removeConfirm = { id: proj.id, name: proj.name };
+  }
+
+  async function confirmRemove() {
+    if (!removeConfirm) return;
+    const projId = removeConfirm.id;
+    removeConfirm = null;
     removing = projId;
     try {
       await removeProject(projId);
@@ -166,313 +174,277 @@
 </script>
 
 <div class="manage-projects">
-  <div class="manage-header">
-    <button class="btn btn-secondary" onclick={() => navigateTo($projects.length > 0 ? 'list' : 'manage')}>
-      ← Back
+  <div class="toolbar manage-toolbar">
+    <button class="btn btn-ghost" onclick={() => navigateTo($projects.length > 0 ? 'list' : 'manage')}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      Back
     </button>
-    <h2>Manage Projects</h2>
+    <h2 class="toolbar-title">Manage Projects</h2>
   </div>
 
   <!-- Current Projects -->
-  <div class="section">
-    <h3>Current Projects ({$projects.length})</h3>
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Current Projects</h3>
+      <span class="badge badge-neutral">{$projects.length}</span>
+    </div>
     {#if $projects.length === 0}
       <p class="empty-text">No projects configured. Add one below.</p>
     {:else}
-      <div class="projects-list">
-        {#each $projects as proj, i}
-          <div class="project-card" class:active={i === $activeProjectId}>
-            <div class="project-info">
-              <div class="project-name">{proj.name}</div>
-              <div class="project-meta">
-                <span class="meta-label">{proj.workspace}/{proj.repo_slug}</span>
-                <span class="meta-id">ID: {proj.id}</span>
+      <div class="panel-body">
+        <div class="projects-grid">
+          {#each $projects as proj, i}
+            <div class="project-card" class:selected={i === $activeProjectId}>
+              <div class="project-info">
+                <div class="project-name">{proj.name}</div>
+                <div class="project-meta">
+                  <code class="project-path">{proj.workspace}/{proj.repo_slug}</code>
+                  <span class="project-id">ID: {proj.id}</span>
+                </div>
+              </div>
+              <div class="project-actions">
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick={() => { activeProjectId.set(i); navigateTo('list'); }}
+                >
+                  Select
+                </button>
+                <button
+                  class="btn btn-danger btn-sm"
+                  disabled={removing === proj.id}
+                  onclick={() => promptRemove(proj)}
+                >
+                  {removing === proj.id ? 'Removing…' : 'Remove'}
+                </button>
               </div>
             </div>
-            <div class="project-actions">
-              <button
-                class="btn btn-small"
-                onclick={() => { activeProjectId.set(i); navigateTo('list'); }}
-              >
-                Select
-              </button>
-              <button
-                class="btn btn-danger-small"
-                disabled={removing === proj.id}
-                onclick={() => handleRemove(proj.id)}
-              >
-                {removing === proj.id ? 'Removing...' : 'Remove'}
-              </button>
-            </div>
-          </div>
-        {/each}
+          {/each}
+        </div>
       </div>
     {/if}
   </div>
 
   <!-- Add Project -->
-  <div class="section">
-    <h3>Add New Project</h3>
-    <form class="add-form" onsubmit={handleAdd}>
-      <div class="add-row">
-        <div class="form-group">
-          <label class="form-label" for="workspace">Workspace</label>
-          <input
-            id="workspace"
-            type="text"
-            class="form-input"
-            placeholder="e.g. secutix"
-            bind:value={newWorkspace}
-            oninput={handleWorkspaceInput}
-            required
-          />
-          <span class="form-hint">Start typing to search repositories</span>
-        </div>
-        <div class="form-group slug-group">
-          <label class="form-label" for="repoSlug">Repository Slug</label>
-          <div class="slug-input-wrapper">
-            <input
-              id="repoSlug"
-              type="text"
-              class="form-input"
-              placeholder="e.g. infra-bbc_pipeline-tui"
-              bind:value={newRepoSlug}
-              onkeydown={handleSuggestionKeydown}
-              onfocus={() => { if ($workspaceRepos.length > 0) showSuggestions = true; }}
-              onblur={hideSuggestions}
-              oninput={() => { if ($workspaceRepos.length > 0) showSuggestions = true; highlightedIdx = -1; }}
-              required
-            />
-            {#if newRepoSlug}
-              <button type="button" class="clear-input-btn" onclick={clearSlugInput} tabindex="-1">&times;</button>
-            {/if}
-            {#if showSuggestions && suggestions.length > 0}
-              <div class="suggestions-dropdown">
-                {#each suggestions as repo, i}
-                  <button
-                    type="button"
-                    class="suggestion-item"
-                    class:highlighted={i === highlightedIdx}
-                    onclick={() => selectRepoSlug(repo)}
-                  >
-                    <span class="suggestion-name">{repo.name || repo.full_name}</span>
-                    <span class="suggestion-fullname">{repo.full_name || ''}</span>
-                  </button>
-                {/each}
+  <div class="panel">
+    <div class="panel-header">
+      <h3>Add Project</h3>
+    </div>
+    <div class="panel-body">
+      <form onsubmit={handleAdd}>
+        <div class="add-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="workspace">Workspace</label>
+              <input
+                id="workspace"
+                type="text"
+                class="form-input"
+                placeholder="e.g. secutix"
+                bind:value={newWorkspace}
+                oninput={handleWorkspaceInput}
+                required
+              />
+              <span class="form-hint">Start typing to search repositories</span>
+            </div>
+            <div class="form-group slug-group">
+              <label class="form-label" for="repoSlug">Repository Slug</label>
+              <div class="slug-input-wrapper">
+                <input
+                  id="repoSlug"
+                  type="text"
+                  class="form-input"
+                  placeholder="e.g. infra-bbc_pipeline-tui"
+                  bind:value={newRepoSlug}
+                  onkeydown={handleSuggestionKeydown}
+                  onfocus={() => { if ($workspaceRepos.length > 0) showSuggestions = true; }}
+                  onblur={hideSuggestions}
+                  oninput={() => { if ($workspaceRepos.length > 0) showSuggestions = true; highlightedIdx = -1; }}
+                />
+                {#if newRepoSlug}
+                  <button type="button" class="clear-input-btn" onclick={clearSlugInput} tabindex="-1">&times;</button>
+                {/if}
+                {#if showSuggestions && suggestions.length > 0}
+                  <div class="suggestions-dropdown">
+                    {#each suggestions as repo, i}
+                      <button
+                        type="button"
+                        class="suggestion-item"
+                        class:highlighted={i === highlightedIdx}
+                        onclick={() => selectRepoSlug(repo)}
+                      >
+                        <span class="suggestion-name">{repo.name || repo.full_name}</span>
+                        <span class="suggestion-fullname">{repo.full_name || ''}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
               </div>
-            {/if}
+              {#if searchLoading}
+                <span class="form-hint hint-loading">Searching repositories…</span>
+              {:else if $workspaceReposError}
+                <span class="form-hint hint-error">{$workspaceReposError}</span>
+              {:else if $workspaceReposState === 'ready' && $workspaceRepos.length === 0}
+                <span class="form-hint hint-warning">No repositories found for this workspace</span>
+              {:else if $workspaceReposState === 'ready' && !showSuggestions}
+                <span class="form-hint">{$workspaceRepos.length} repository(s) — click field to browse</span>
+              {/if}
+            </div>
+            <button type="submit" class="btn btn-primary add-btn" disabled={adding}>
+              {adding ? 'Adding…' : '+ Add'}
+            </button>
           </div>
-          {#if searchLoading}
-            <span class="form-hint loading-hint">🔍 Searching repositories...</span>
-          {:else if $workspaceReposError}
-            <span class="form-hint error-hint">❌ {$workspaceReposError}</span>
-          {:else if $workspaceReposState === 'ready' && $workspaceRepos.length === 0}
-            <span class="form-hint no-results-hint">No repositories found for this workspace</span>
-          {:else if $workspaceReposState === 'ready' && !showSuggestions}
-            <span class="form-hint">{$workspaceRepos.length} repository(s) — click field to browse</span>
-          {/if}
         </div>
-        <button type="submit" class="btn btn-primary btn-add" disabled={adding}>
-          {adding ? 'Adding...' : '+ Add'}
-        </button>
-      </div>
-    </form>
+      </form>
+    </div>
   </div>
 </div>
+
+<ConfirmModal
+  open={removeConfirm !== null}
+  title="Remove Project"
+  message={`Are you sure you want to remove project "${removeConfirm?.name || '—'}"? This action cannot be undone.`}
+  confirmText="Remove"
+  danger={true}
+  onconfirm={confirmRemove}
+  oncancel={() => (removeConfirm = null)}
+/>
 
 <style>
   .manage-projects {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: var(--space-5);
+    padding: var(--space-6);
+    height: 100%;
+    overflow-y: auto;
   }
 
-  .manage-header {
+  .manage-toolbar {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: var(--space-4);
+    flex-shrink: 0;
   }
 
-  .manage-header h2 {
-    font-size: 1.3rem;
+  .toolbar-title {
+    font-size: var(--font-size-md);
     font-weight: 600;
-  }
-
-  .section {
-    background: #16181c;
-    border: 1px solid #2f3336;
-    border-radius: 12px;
-    padding: 1.25rem;
-  }
-
-  h3 {
-    font-size: 1rem;
-    margin-bottom: 1rem;
-    color: #e7e9ea;
+    color: var(--text-primary);
+    margin: 0;
   }
 
   .empty-text {
-    color: #71767b;
+    color: var(--text-tertiary);
     font-style: italic;
+    font-size: var(--font-size-sm);
+    padding: var(--space-6);
+    text-align: center;
   }
 
-  .btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 9999px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    white-space: nowrap;
-  }
-
-  .btn-secondary {
-    background: #2f3336;
-    color: #e7e9ea;
-  }
-
-  .btn-secondary:hover { background: #3e4144; }
-
-  .btn-primary {
-    background: #1d9bf0;
-    color: #fff;
-  }
-
-  .btn-primary:hover { background: #1a8cd8; }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-small {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.8rem;
-    background: #2f3336;
-    color: #e7e9ea;
-    border: none;
-    border-radius: 9999px;
-    cursor: pointer;
-  }
-  .btn-small:hover { background: #3e4144; }
-
-  .btn-danger-small {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.8rem;
-    background: #b91c1c;
-    color: #fff;
-    border: none;
-    border-radius: 9999px;
-    cursor: pointer;
-  }
-  .btn-danger-small:hover { background: #991b1b; }
-  .btn-danger-small:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-add {
-    height: fit-content;
-    align-self: flex-end;
-  }
-
-  .projects-list {
+  /* ── Project Cards ──────────────────────────────────────── */
+  .projects-grid {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-3);
   }
 
   .project-card {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 1rem;
-    background: #1a1d23;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-    transition: border-color 0.15s;
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
-
-  .project-card.active { border-color: #1d9bf0; }
+  .project-card:hover { border-color: var(--border-default); }
+  .project-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
 
   .project-info {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: var(--space-2);
+    min-width: 0;
   }
 
-  .project-name { font-weight: 600; }
+  .project-name {
+    font-weight: 600;
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .project-meta {
     display: flex;
-    gap: 0.75rem;
-    font-size: 0.8rem;
-    color: #8b949e;
+    gap: var(--space-4);
+    align-items: center;
+    flex-wrap: wrap;
   }
 
-  .meta-label { font-family: 'SF Mono', 'Fira Code', monospace; }
-  .meta-id { color: #484f58; }
+  .project-path {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    background: var(--bg-input);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .project-id {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+  }
 
   .project-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-3);
+    flex-shrink: 0;
   }
 
+  /* ── Add Form ────────────────────────────────────────────── */
   .add-form {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
   }
 
-  .add-row {
+  .form-row {
     display: flex;
-    gap: 1rem;
-    align-items: flex-start;
+    gap: var(--space-4);
+    align-items: flex-end;
     flex-wrap: wrap;
   }
 
   .form-group {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--space-3);
     flex: 1;
     min-width: 200px;
   }
 
-  .form-label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #8b949e;
-  }
-
-  .form-hint {
-    font-size: 0.72rem;
-    color: #484f58;
-    min-height: 1em;
-  }
-
-  .loading-hint { color: #8b949e; }
-  .error-hint { color: #f4a2a2; }
-  .no-results-hint { color: #c6903b; }
-
-  .form-input {
-    background: #0d1117;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    color: #e7e9ea;
-    font-size: 0.9rem;
-    outline: none;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .form-input:focus { border-color: #1d9bf0; }
-  .form-input::placeholder { color: #484f58; }
-
   .slug-group { flex: 2; }
 
+  .add-btn {
+    height: fit-content;
+    align-self: flex-end;
+  }
+
+  /* Slug wrapper */
   .slug-input-wrapper {
     position: relative;
     display: flex;
     align-items: center;
   }
-
   .slug-input-wrapper .form-input { padding-right: 2rem; }
 
   .clear-input-btn {
@@ -482,66 +454,59 @@
     transform: translateY(-50%);
     background: none;
     border: none;
-    color: #8b949e;
+    color: var(--text-tertiary);
     font-size: 1.1rem;
     cursor: pointer;
     padding: 2px 6px;
     line-height: 1;
     border-radius: 4px;
+    font-family: var(--font-ui);
   }
+  .clear-input-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 
-  .clear-input-btn:hover {
-    color: #e7e9ea;
-    background: #2f3336;
-  }
-
+  /* Suggestions */
   .suggestions-dropdown {
     position: absolute;
     top: 100%;
     left: 0;
     right: 0;
     margin-top: 4px;
-    background: #1a1d23;
-    border: 1px solid #1d9bf0;
-    border-radius: 8px;
+    background: var(--bg-panel);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
     max-height: 240px;
     overflow-y: auto;
     z-index: 100;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
+  .suggestions-dropdown::-webkit-scrollbar { width: 6px; }
+  .suggestions-dropdown::-webkit-scrollbar-track { background: var(--bg-panel); }
+  .suggestions-dropdown::-webkit-scrollbar-thumb { background: var(--border-emphasis); border-radius: 3px; }
 
   .suggestion-item {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     width: 100%;
-    padding: 0.5rem 0.75rem;
+    padding: var(--space-3) var(--space-5);
     background: none;
     border: none;
-    border-bottom: 1px solid #21262d;
-    color: #e7e9ea;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
     cursor: pointer;
     text-align: left;
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
     transition: background 0.1s;
+    font-family: var(--font-ui);
   }
-
   .suggestion-item:last-child { border-bottom: none; }
-  .suggestion-item:hover { background: #1d2e3e; }
-  .suggestion-item.highlighted { background: #1d3e5e; }
+  .suggestion-item:hover { background: var(--bg-hover); }
+  .suggestion-item.highlighted { background: var(--bg-selection); }
 
-  .suggestion-name {
-    font-weight: 600;
-    font-size: 0.85rem;
-  }
+  .suggestion-name { font-weight: 600; font-size: var(--font-size-sm); }
+  .suggestion-fullname { font-size: var(--font-size-xs); color: var(--text-tertiary); font-family: var(--font-mono); }
 
-  .suggestion-fullname {
-    font-size: 0.72rem;
-    color: #8b949e;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .suggestions-dropdown::-webkit-scrollbar { width: 6px; }
-  .suggestions-dropdown::-webkit-scrollbar-track { background: #1a1d23; }
-  .suggestions-dropdown::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  .hint-loading { color: var(--text-tertiary); }
+  .hint-error { color: var(--error-text); }
+  .hint-warning { color: var(--warning); }
 </style>

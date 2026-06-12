@@ -3,248 +3,381 @@
   import { page, navigateTo } from '../stores/router.js';
 
   let projectCount = $derived($projects.length);
-  let dropdownOpen = $state(false);
-
-  function toggleDropdown() {
-    dropdownOpen = !dropdownOpen;
-  }
+  let switching = $state(false);
 
   function selectProject(index) {
-    dropdownOpen = false;
     if (index === $activeProjectId) return;
+    switching = true;
     activeProjectId.set(index);
-    // Navigate to list for the newly selected project
     navigateTo('list');
   }
-
-  function closeDropdown() {
-    dropdownOpen = false;
-  }
-
-  // Close dropdown when clicking outside
-  $effect(() => {
-    if (!dropdownOpen) return;
-    function handleClick(e) {
-      if (!e.target.closest('.project-dropdown')) {
-        dropdownOpen = false;
-      }
-    }
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  });
 </script>
 
-<nav class="navbar">
-  <div class="nav-left">
-    <button class="nav-brand" onclick={() => navigateTo('list')}>
-      🚀 BBC Pipeline Manager
-    </button>
-    {#if projectCount > 0}
-      <span class="nav-sep">/</span>
-      <div class="project-dropdown">
-        <button class="nav-project-btn" onclick={toggleDropdown}>
-          {$activeProject?.name || 'No project'}
-          <span class="dropdown-arrow" class:open={dropdownOpen}>▾</span>
-        </button>
-        {#if dropdownOpen}
-          <div class="dropdown-menu">
-            {#each $projects as proj, i}
-              <button
-                class="dropdown-item"
-                class:active={i === $activeProjectId}
-                onclick={() => selectProject(i)}
-              >
-                <span class="item-name">{proj.name}</span>
-                <span class="item-meta">{proj.workspace}/{proj.repo_slug}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-  </div>
-  <div class="nav-right">
-    {#if $activeProject}
-      <button
-        class="nav-btn"
-        class:active={$page === 'list'}
-        onclick={() => navigateTo('list')}
-      >
-        📋 Pipelines
-      </button>
-    {/if}
+<aside class="sidebar" role="navigation" aria-label="Primary navigation">
+  <!-- Activity Bar ──────────────────────────────────────── -->
+  <div class="activity-bar">
+    <!-- Pipelines -->
     <button
-      class="nav-btn"
+      class="activity-item"
+      class:active={$page === 'list' || $page === 'detail' || $page === 'logs'}
+      onclick={() => navigateTo('list')}
+      title="Pipelines"
+      disabled={!$activeProject}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"></line>
+        <line x1="8" y1="12" x2="21" y2="12"></line>
+        <line x1="8" y1="18" x2="21" y2="18"></line>
+        <line x1="3" y1="6" x2="3.01" y2="6"></line>
+        <line x1="3" y1="12" x2="3.01" y2="12"></line>
+        <line x1="3" y1="18" x2="3.01" y2="18"></line>
+      </svg>
+    </button>
+
+    <!-- Trigger -->
+    <button
+      class="activity-item"
+      class:active={$page === 'trigger'}
+      onclick={() => navigateTo('trigger')}
+      title="Trigger Pipeline"
+      disabled={!$activeProject}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+      </svg>
+    </button>
+
+    <!-- Projects -->
+    <button
+      class="activity-item"
       class:active={$page === 'manage'}
       onclick={() => navigateTo('manage')}
+      title="Manage Projects"
     >
-      ⚙ Manage
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
     </button>
+
+    <!-- Spacer pushes refresh to bottom -->
+    <div class="activity-spacer"></div>
+
     {#if $activeProject}
       <button
-        class="nav-btn nav-btn-refresh"
-        title="Refresh current view"
+        class="activity-item"
         onclick={() => refreshTrigger.update(n => n + 1)}
+        title="Refresh"
       >
-        🔄 Refresh
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
       </button>
     {/if}
   </div>
-</nav>
+
+  <!-- Sidebar Panel ──────────────────────────────────────── -->
+  <div class="sidebar-panel">
+    <div class="sidebar-brand">
+      <svg class="brand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+      </svg>
+      <span class="brand-text">Pipelines</span>
+      <span class="brand-badge">{$projects.length}</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Project List ───────────────────────────────────── -->
+    {#if projectCount > 0}
+      <div class="project-section">
+        <div class="section-label">Projects</div>
+        <div class="project-list">
+          {#each $projects as proj, i}
+            <button
+              class="project-item"
+              class:active={i === $activeProjectId}
+              onclick={() => selectProject(i)}
+              title="{proj.workspace}/{proj.repo_slug}"
+            >
+              <div class="project-item-content">
+                <span class="project-item-name">{proj.name}</span>
+                <span class="project-item-meta">{proj.workspace}/{proj.repo_slug}</span>
+              </div>
+              {#if i === $activeProjectId}
+                <span class="project-check">✓</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {:else}
+      <div class="sidebar-empty">
+        <p>No projects configured</p>
+      </div>
+    {/if}
+
+    <div class="sidebar-footer">
+      <button class="sidebar-footer-btn" onclick={() => navigateTo('manage')}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        Settings
+      </button>
+    </div>
+  </div>
+</aside>
 
 <style>
-  .navbar {
+  .sidebar {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.75rem 1.5rem;
-    background: #16181c;
-    border-bottom: 1px solid #2f3336;
-    position: sticky;
-    top: 0;
-    z-index: 100;
+    height: 100%;
+    flex-shrink: 0;
+    user-select: none;
   }
 
-  .nav-left {
+  /* ── Activity Bar (left icon rail) ──────────────────── */
+  .activity-bar {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
+    width: 42px;
+    min-width: 42px;
+    background: #333333;
+    border-right: 1px solid var(--border-default);
+    padding: var(--space-2) 0;
+    gap: var(--space-1);
   }
 
-  .nav-brand {
-    font-weight: 700;
-    font-size: 1.1rem;
-    cursor: pointer;
-    color: #e7e9ea;
+  .activity-spacer {
+    flex: 1;
+  }
+
+  .activity-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
     background: none;
     border: none;
-    font-family: inherit;
-  }
-
-  .nav-brand:hover {
-    color: #1d9bf0;
-  }
-
-  .nav-sep {
-    color: #71767b;
-  }
-
-  .project-dropdown {
+    border-radius: var(--radius-md);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast);
     position: relative;
   }
 
-  .nav-project-btn {
-    background: none;
-    border: 1px solid transparent;
-    color: #1d9bf0;
-    font-weight: 500;
-    font-size: 0.95rem;
-    cursor: pointer;
-    padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    transition: all 0.15s;
-    font-family: inherit;
+  .activity-item:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.05);
   }
 
-  .nav-project-btn:hover {
-    background: #2f3336;
-    border-color: #2f3336;
+  .activity-item.active {
+    color: var(--accent-text);
   }
 
-  .dropdown-arrow {
-    font-size: 0.7rem;
-    transition: transform 0.2s;
-  }
-
-  .dropdown-arrow.open {
-    transform: rotate(180deg);
-  }
-
-  .dropdown-menu {
+  .activity-item.active::before {
+    content: '';
     position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 0.4rem;
-    background: #16181c;
-    border: 1px solid #2f3336;
-    border-radius: 10px;
-    min-width: 280px;
-    max-height: 320px;
-    overflow-y: auto;
-    z-index: 200;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    padding: 0.35rem;
+    left: -4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 20px;
+    background: var(--accent);
+    border-radius: 1px;
   }
 
-  .dropdown-item {
+  .activity-item:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .activity-item:disabled:hover {
+    background: none;
+    color: var(--text-tertiary);
+  }
+
+  /* ── Sidebar Panel ───────────────────────────────────── */
+  .sidebar-panel {
     display: flex;
     flex-direction: column;
-    width: 100%;
-    background: none;
-    border: none;
-    color: #e7e9ea;
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.12s;
-    font-family: inherit;
+    width: var(--sidebar-width);
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-default);
+    overflow: hidden;
   }
 
-  .dropdown-item:hover {
-    background: #2f3336;
-  }
-
-  .dropdown-item.active {
-    background: #1d2e3e;
-    border: 1px solid #1d9bf0;
-    padding: calc(0.5rem - 1px) calc(0.75rem - 1px);
-  }
-
-  .item-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
-
-  .item-meta {
-    font-size: 0.75rem;
-    color: #71767b;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .nav-right {
+  .sidebar-brand {
     display: flex;
-    gap: 0.25rem;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-5) var(--space-5) var(--space-3);
+    color: var(--text-primary);
   }
 
-  .nav-btn {
-    background: none;
+  .brand-icon {
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .brand-text {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    flex: 1;
+  }
+
+  .brand-badge {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    color: var(--text-tertiary);
+    background: var(--bg-input);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Divider ─────────────────────────────────────────── */
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 0 var(--space-5);
+    flex-shrink: 0;
+  }
+
+  /* ── Project Section ─────────────────────────────────── */
+  .project-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: var(--space-3) 0;
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-tertiary);
+    padding: var(--space-2) var(--space-5);
+    user-select: none;
+  }
+
+  .project-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 0 var(--space-3);
+  }
+
+  .project-item {
+    display: flex;
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
     border: none;
-    color: #71767b;
-    padding: 0.5rem 1rem;
-    border-radius: 9999px;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    transition: all var(--transition-fast);
+    text-align: left;
+    width: 100%;
+    font-family: var(--font-ui);
+    gap: var(--space-2);
+  }
+
+  .project-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .project-item.active {
+    background: rgba(0, 122, 204, 0.15);
+    color: var(--accent-text);
+  }
+
+  .project-item-content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .project-item-name {
     font-weight: 500;
-    transition: all 0.15s;
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
   }
 
-  .nav-btn:hover {
-    background: #2f3336;
-    color: #e7e9ea;
+  .project-item-meta {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .nav-btn.active {
-    background: #2f3336;
-    color: #1d9bf0;
+  .project-item.active .project-item-meta {
+    color: rgba(79, 193, 255, 0.7);
   }
 
-  .nav-btn-refresh {
-    margin-left: 0.5rem;
-    border-left: 1px solid #2f3336;
-    padding-left: 1.25rem;
+  .project-check {
+    font-size: 12px;
+    color: var(--accent-text);
+    flex-shrink: 0;
+  }
+
+  .project-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  /* ── Sidebar Empty ──────────────────────────────────── */
+  .sidebar-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-6);
+    color: var(--text-tertiary);
+    font-size: var(--font-size-xs);
+    text-align: center;
+  }
+
+  /* ── Sidebar Footer ──────────────────────────────────── */
+  .sidebar-footer {
+    border-top: 1px solid var(--border-subtle);
+    padding: var(--space-3);
+  }
+
+  .sidebar-footer-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--text-tertiary);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    transition: all var(--transition-fast);
+  }
+
+  .sidebar-footer-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
 </style>

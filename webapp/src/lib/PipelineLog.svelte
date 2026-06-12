@@ -4,7 +4,7 @@
   import { navigateTo, stepNumFromUrl } from '../stores/router.js';
   import { getStepLog } from '../stores/api.js';
 
-  let logState = $state('idle'); // 'idle' | 'loading' | 'ready' | 'error'
+  let logState = $state('idle');
   let logError = $state('');
   let currentStepIndex = $state(-1);
   let autoRefreshInterval = null;
@@ -16,346 +16,103 @@
   let currentMatchIdx = $state(-1);
   let logViewerEl = $state(null);
 
-  // ── ANSI to HTML conversion ─────────────────────────────────────────────────
-
-  /**
-   * Converts ANSI escape codes in log text to HTML spans with inline styles.
-   * Handles: colors (3/4-bit, 8-bit, 24-bit), bold, italic, underline, reset.
-   */
   function ansiToHtml(text) {
     if (!text) return '';
     let out = '';
     let i = 0;
-    let spans = []; // stack of open tag styles
-
-    function currentStyle() {
-      if (spans.length === 0) return '';
-      return spans[spans.length - 1];
+    let spans = [];
+    function currentStyle() { return spans.length === 0 ? '' : spans[spans.length - 1]; }
+    function pushSpan(styleAttrs) { spans.push(styleAttrs); return `<span style="${styleAttrs}">`; }
+    function closeSpans(count) { for (let j = 0; j < count; j++) spans.pop(); return '</span>'.repeat(count); }
+    function closeAllSpans() { const c = spans.length; spans = []; return '</span>'.repeat(c); }
+    const fg = {30:'#000',31:'#cd0000',32:'#00cd00',33:'#cdcd00',34:'#0000ee',35:'#cd00cd',36:'#00cdcd',37:'#e5e5e5'};
+    const bg = {40:'#000',41:'#cd0000',42:'#00cd00',43:'#cdcd00',44:'#0000ee',45:'#cd00cd',46:'#00cdcd',47:'#e5e5e5'};
+    const bfg = {90:'#7f7f7f',91:'#f00',92:'#0f0',93:'#ff0',94:'#5c5cff',95:'#f0f',96:'#0ff',97:'#fff'};
+    const bbg = {100:'#7f7f7f',101:'#f00',102:'#0f0',103:'#ff0',104:'#5c5cff',105:'#f0f',106:'#0ff',107:'#fff'};
+    let sp = [];
+    function ss() { const e=currentStyle(); const p=[...sp]; if(e){const m={};e.split(';').forEach(x=>{const[k,v]=x.split(':').map(s=>s.trim());if(k)m[k]=v||k}); for(const x of p){const[k,v]=x.split(':');if(v)m[k]=v;else delete m[k];} return Object.entries(m).map(([k,v])=>`${k}:${v}`).join(';');} return p.join(';'); }
+    function os() { const s=ss(); if(s) out+=pushSpan(s); sp=[]; }
+    function ac(code) {
+      if(code===0){sp=[];if(spans.length>0)out+=closeAllSpans();return;}
+      if(code===1){sp.push('font-weight:bold');return;} if(code===2){sp.push('opacity:0.6');return;} if(code===3){sp.push('font-style:italic');return;}
+      if(code===4){sp.push('text-decoration:underline');return;} if(code===5){sp.push('animation:blink 1s step-end infinite');return;}
+      if(code===7){const s=currentStyle();if(s){const m={};s.split(';').forEach(x=>{const[k,v]=x.split(':').map(y=>y.trim());if(k)m[k]=v||k});const f=m['color']||'inherit',b=m['background-color']||'inherit';if(f!=='inherit')sp.push(`background-color:${f}`);else sp.push('background-color:inherit');if(b!=='inherit')sp.push(`color:${b}`);else sp.push('color:inherit');}return;}
+      if(code===9){sp.push('text-decoration:line-through');return;} if(code===22){sp=sp.filter(p=>!p.includes('font-weight')&&!p.includes('opacity'));return;}
+      if(code===23){sp=sp.filter(p=>!p.includes('font-style'));return;} if(code===24){sp=sp.filter(p=>!p.includes('text-decoration:underline'));return;}
+      if(code===25){sp=sp.filter(p=>!p.includes('animation:blink'));return;} if(code===27||code===29)return; if(fg[code]){sp.push(`color:${fg[code]}`);return;}
+      if(bfg[code]){sp.push(`color:${bfg[code]}`);return;} if(bg[code]){sp.push(`background-color:${bg[code]}`);return;} if(bbg[code]){sp.push(`background-color:${bbg[code]}`);return;}
+      if(code===38||code===48)return; if(code===39){sp=sp.filter(p=>!p.startsWith('color:'));return;} if(code===49){sp=sp.filter(p=>!p.startsWith('background-color'));return;}
     }
-
-    function pushSpan(styleAttrs) {
-      spans.push(styleAttrs);
-      return `<span style="${styleAttrs}">`;
-    }
-
-    function closeSpans(count) {
-      let tags = '';
-      for (let j = 0; j < count; j++) {
-        spans.pop();
-        tags += '</span>';
-      }
-      return tags;
-    }
-
-    function closeAllSpans() {
-      const count = spans.length;
-      spans = [];
-      return '</span>'.repeat(count);
-    }
-
-    // Map standard 4-bit SGR colors to CSS
-    const fgColors = {
-      30: '#000000', 31: '#cd0000', 32: '#00cd00', 33: '#cdcd00',
-      34: '#0000ee', 35: '#cd00cd', 36: '#00cdcd', 37: '#e5e5e5',
-    };
-    const bgColors = {
-      40: '#000000', 41: '#cd0000', 42: '#00cd00', 43: '#cdcd00',
-      44: '#0000ee', 45: '#cd00cd', 46: '#00cdcd', 47: '#e5e5e5',
-    };
-    const brightFg = {
-      90: '#7f7f7f', 91: '#ff0000', 92: '#00ff00', 93: '#ffff00',
-      94: '#5c5cff', 95: '#ff00ff', 96: '#00ffff', 97: '#ffffff',
-    };
-    const brightBg = {
-      100: '#7f7f7f', 101: '#ff0000', 102: '#00ff00', 103: '#ffff00',
-      104: '#5c5cff', 105: '#ff00ff', 106: '#00ffff', 107: '#ffffff',
-    };
-
-    const len = text.length;
-    let styleParts = [];
-
-    function buildStyleString() {
-      const existing = currentStyle();
-      const parts = [...styleParts];
-      if (existing) {
-        const map = {};
-        existing.split(';').forEach(p => {
-          const [k, v] = p.trim().split(':').map(s => s.trim());
-          if (k) map[k] = v || k;
-        });
-        for (const p of parts) {
-          const [k, v] = p.split(':');
-          if (v) map[k] = v;
-          else delete map[k];
-        }
-        return Object.entries(map).map(([k, v]) => `${k}:${v}`).join(';');
-      }
-      return parts.join(';');
-    }
-
-    function openStyledSpan() {
-      const style = buildStyleString();
-      if (style) {
-        out += pushSpan(style);
-      }
-      styleParts = [];
-    }
-
-    function applyCode(code) {
-      // Reset
-      if (code === 0) {
-        styleParts = [];
-        if (spans.length > 0) {
-          out += closeAllSpans();
-        }
-        return;
-      }
-      // Bold
-      if (code === 1) { styleParts.push('font-weight:bold'); return; }
-      // Dim/faint
-      if (code === 2) { styleParts.push('opacity:0.6'); return; }
-      // Italic
-      if (code === 3) { styleParts.push('font-style:italic'); return; }
-      // Underline
-      if (code === 4) { styleParts.push('text-decoration:underline'); return; }
-      // Blink
-      if (code === 5) { styleParts.push('animation:blink 1s step-end infinite'); return; }
-      // Inverse (swap fg/bg)
-      if (code === 7) {
-        const style = currentStyle();
-        if (style) {
-          const map = {};
-          style.split(';').forEach(p => {
-            const [k, v] = p.trim().split(':').map(s => s.trim());
-            if (k) map[k] = v || k;
-          });
-          const fg = map['color'] || 'inherit';
-          const bg = map['background-color'] || 'inherit';
-          if (fg !== 'inherit') styleParts.push(`background-color:${fg}`);
-          if (bg !== 'inherit') styleParts.push(`color:${bg}`);
-        }
-        return;
-      }
-      // Strikethrough
-      if (code === 9) { styleParts.push('text-decoration:line-through'); return; }
-      // Normal intensity (not bold, not dim)
-      if (code === 22) { styleParts = styleParts.filter(p => !p.includes('font-weight') && !p.includes('opacity')); return; }
-      // Not italic
-      if (code === 23) { styleParts = styleParts.filter(p => !p.includes('font-style')); return; }
-      // Not underline
-      if (code === 24) { styleParts = styleParts.filter(p => !p.includes('text-decoration:underline')); return; }
-      // Not blink
-      if (code === 25) { styleParts = styleParts.filter(p => !p.includes('animation:blink')); return; }
-      // Not inverse
-      if (code === 27) { return; }
-      // Not strikethrough
-      if (code === 29) { styleParts = styleParts.filter(p => !p.includes('text-decoration:line-through')); return; }
-      // Foreground colors
-      if (fgColors[code]) { styleParts.push(`color:${fgColors[code]}`); return; }
-      if (brightFg[code]) { styleParts.push(`color:${brightFg[code]}`); return; }
-      // Background colors
-      if (bgColors[code]) { styleParts.push(`background-color:${bgColors[code]}`); return; }
-      if (brightBg[code]) { styleParts.push(`background-color:${brightBg[code]}`); return; }
-      // 8-bit foreground (38;5;n) — handled by sequence below
-      if (code === 38) { return; }
-      // 8-bit background (48;5;n) — handled by sequence below
-      if (code === 48) { return; }
-      // Default foreground
-      if (code === 39) { styleParts = styleParts.filter(p => !p.startsWith('color:')); return; }
-      // Default background
-      if (code === 49) { styleParts = styleParts.filter(p => !p.startsWith('background-color')); return; }
-    }
-
-    while (i < len) {
-      // Escape HTML special characters before any other processing
-      if (text[i] === '&') { out += '&amp;'; i++; continue; }
-      if (text[i] === '<') { out += '&lt;'; i++; continue; }
-      if (text[i] === '>') { out += '&gt;'; i++; continue; }
-
-      // Check for ANSI escape sequence
-      if (text[i] === '\x1b' && i + 1 < len && text[i + 1] === '[') {
-        i += 2; // skip ESC [
-        let seq = '';
-        while (i < len && text[i] !== 'm') {
-          seq += text[i];
-          i++;
-        }
-        if (i < len) i++; // skip 'm'
-
-        // Parse SGR parameters
-        const params = seq.split(';').map(Number);
-
-        // Open a new styled span if we have accumulated style changes
-        if (styleParts.length > 0 && spans.length === 0) {
-          openStyledSpan();
-        }
-
-        let p = 0;
-        while (p < params.length) {
-          const code = params[p];
-          if (code === 38 && p + 2 < params.length && params[p + 1] === 5) {
-            // 8-bit foreground: 38;5;n
-            const colorIdx = params[p + 2];
-            const c = xterm256Color(colorIdx);
-            if (c) {
-              styleParts.push(`color:${c}`);
-            }
-            p += 3;
-          } else if (code === 48 && p + 2 < params.length && params[p + 1] === 5) {
-            // 8-bit background: 48;5;n
-            const colorIdx = params[p + 2];
-            const c = xterm256Color(colorIdx);
-            if (c) {
-              styleParts.push(`background-color:${c}`);
-            }
-            p += 3;
-          } else if (code === 38 && p + 4 < params.length && params[p + 1] === 2) {
-            // 24-bit foreground: 38;2;r;g;b
-            const r = params[p + 2], g = params[p + 3], b = params[p + 4];
-            styleParts.push(`color:rgb(${r},${g},${b})`);
-            p += 5;
-          } else if (code === 48 && p + 4 < params.length && params[p + 1] === 2) {
-            // 24-bit background: 48;2;r;g;b
-            const r = params[p + 2], g = params[p + 3], b = params[p + 4];
-            styleParts.push(`background-color:rgb(${r},${g},${b})`);
-            p += 5;
-          } else {
-            applyCode(code);
-            p++;
-          }
-        }
-
-        // If we have style changes, open a new span (close old one first)
-        if (styleParts.length > 0) {
-          // Close previous span if any
-          if (spans.length > 0) {
-            out += closeSpans(1);
-          }
-          openStyledSpan();
-        }
-        continue;
-      }
-
-      out += text[i];
-      i++;
-    }
-
-    // Close any remaining open spans
-    out += closeAllSpans();
-    return out;
+    const len=text.length;
+    while(i<len){if(text[i]==='&'){out+='&';i++;continue;}if(text[i]==='<'){out+='<';i++;continue;}if(text[i]==='>'){out+='>';i++;continue;}
+      if(text[i]==='\x1b'&&i+1<len&&text[i+1]==='['){i+=2;let seq='';while(i<len&&text[i]!=='m'){seq+=text[i];i++;}if(i<len)i++;
+        const params=seq.split(';').map(Number);if(sp.length>0&&spans.length===0)os();let p=0;
+        while(p<params.length){const c=params[p];
+          if(c===38&&p+2<params.length&&params[p+1]===5){const ci=params[p+2];const col=xterm256Color(ci);if(col)sp.push(`color:${col}`);p+=3;}
+          else if(c===48&&p+2<params.length&&params[p+1]===5){const ci=params[p+2];const col=xterm256Color(ci);if(col)sp.push(`background-color:${col}`);p+=3;}
+          else if(c===38&&p+4<params.length&&params[p+1]===2){sp.push(`color:rgb(${params[p+2]},${params[p+3]},${params[p+4]})`);p+=5;}
+          else if(c===48&&p+4<params.length&&params[p+1]===2){sp.push(`background-color:rgb(${params[p+2]},${params[p+3]},${params[p+4]})`);p+=5;}
+          else{ac(c);p++;}}
+        if(sp.length>0){if(spans.length>0)out+=closeSpans(1);os();}continue;}out+=text[i];i++;}
+    out+=closeAllSpans();return out;
   }
 
-  /**
-   * Converts xterm 256-color index to CSS hex color.
-   * Covers the standard 6x6x6 cube + grayscale ramp.
-   */
   function xterm256Color(idx) {
-    if (idx < 16) {
-      const colors = [
-        '#000000','#cd0000','#00cd00','#cdcd00','#0000ee','#cd00cd','#00cdcd','#e5e5e5',
-        '#7f7f7f','#ff0000','#00ff00','#ffff00','#5c5cff','#ff00ff','#00ffff','#ffffff'
-      ];
-      return colors[idx] || null;
-    }
-    if (idx >= 16 && idx <= 231) {
-      // 6x6x6 color cube
-      const n = idx - 16;
-      const r = Math.floor(n / 36);
-      const g = Math.floor((n % 36) / 6);
-      const b = n % 6;
-      const toHex = (v) => v === 0 ? '00' : (v * 40 + 55).toString(16);
-      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-    }
-    if (idx >= 232 && idx <= 255) {
-      // Grayscale ramp
-      const v = (idx - 232) * 10 + 8;
-      const h = v.toString(16).padStart(2, '0');
-      return `#${h}${h}${h}`;
-    }
-    return null;
+    if(idx<16){return ['#000','#cd0000','#00cd00','#cdcd00','#0000ee','#cd00cd','#00cdcd','#e5e5e5','#7f7f7f','#f00','#0f0','#ff0','#5c5cff','#f0f','#0ff','#fff'][idx]||null;}
+    if(idx>=16&&idx<=231){const n=idx-16,r=Math.floor(n/36),g=Math.floor((n%36)/6),b=n%6;const th=v=>v===0?'00':(v*40+55).toString(16);return`#${th(r)}${th(g)}${th(b)}`;}
+    if(idx>=232&&idx<=255){const v=(idx-232)*10+8,h=v.toString(16).padStart(2,'0');return`#${h}${h}${h}`;}return null;
   }
-
-  // ── Derived: colored HTML lines with line numbers ───────────────────────────
 
   let coloredLines = $derived.by(() => {
     if (logState !== 'ready' || !$logContent) return [];
-    const raw = $logContent;
-    // Split, keeping empty trailing lines
-    const lines = raw.split('\n');
-    return lines.map((line, idx) => ({
-      num: idx + 1,
-      html: ansiToHtml(line),
-      raw: line,
-    }));
+    const lines = $logContent.split('\n');
+    return lines.map((line, idx) => ({ num: idx + 1, html: ansiToHtml(line), raw: line }));
   });
-
-  let totalLines = $derived(coloredLines.length);
-
-  // ── Search ─────────────────────────────────────────────────────────────────
 
   let searchMatches = $derived.by(() => {
     if (!searchTerm.trim() || !$logContent) return [];
     const term = searchTerm.toLowerCase();
     const matches = [];
     const lines = $logContent.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].toLowerCase().includes(term)) {
-        matches.push(i);
-      }
-    }
+    for (let i = 0; i < lines.length; i++) if (lines[i].toLowerCase().includes(term)) matches.push(i);
     return matches;
   });
 
-  $effect(() => {
-    matchCount = searchMatches.length;
-    if (currentMatchIdx >= matchCount) currentMatchIdx = matchCount - 1;
-    if (matchCount > 0 && currentMatchIdx < 0) currentMatchIdx = 0;
-    if (matchCount === 0) currentMatchIdx = -1;
-  });
-
-  // ── Scroll to line ─────────────────────────────────────────────────────────
+  $effect(() => { matchCount = searchMatches.length; if (currentMatchIdx >= matchCount) currentMatchIdx = matchCount - 1; if (matchCount > 0 && currentMatchIdx < 0) currentMatchIdx = 0; if (matchCount === 0) currentMatchIdx = -1; });
 
   function scrollToLine(lineNum) {
-    const viewer = logViewerEl;
-    if (!viewer) return;
-    const lineHeight = 20.8; // 0.8rem * 1.6 line-height ≈ 20.8px at 16px base
-    const target = (lineNum - 1) * lineHeight;
-    viewer.scrollTo({ top: target, behavior: 'smooth' });
+    if (!logViewerEl) return;
+    const lineHeight = 20.8;
+    logViewerEl.scrollTo({ top: (lineNum - 1) * lineHeight, behavior: 'smooth' });
   }
 
-  // ── Log loading ────────────────────────────────────────────────────────────
+  let latestRequestId = 0; let consecutiveErrorCount = 0; const MAX_CONSECUTIVE_ERRORS = 3; let logLoadedForStep = null;
 
   async function loadLog(stepIndex) {
     if (!$activeProject || !$selectedPipeline?.uuid || !$selectedSteps[stepIndex]) return;
-
     const step = $selectedSteps[stepIndex];
-    logState = 'loading';
-    logError = '';
-
+    const requestId = ++latestRequestId;
+    logState = 'loading'; logError = '';
     try {
       const data = await getStepLog($activeProject.id, $selectedPipeline.uuid, step.uuid);
+      if (requestId !== latestRequestId) return;
       logContent.set(data.log || 'No log content available');
       logStepName.set(step.name || `Step ${stepIndex + 1}`);
       logStepUUID.set(step.uuid);
       currentStepIndex = stepIndex;
       logState = 'ready';
-      // Auto-scroll to bottom after content renders
+      consecutiveErrorCount = 0;
       await tick();
-      if (autoScroll && logViewerEl) {
-        logViewerEl.scrollTop = logViewerEl.scrollHeight;
-      }
+      if (autoScroll && logViewerEl) logViewerEl.scrollTop = logViewerEl.scrollHeight;
     } catch (e) {
+      if (requestId !== latestRequestId) return;
       logError = e.message;
       logState = 'error';
+      consecutiveErrorCount++;
     }
   }
 
-  function handleRefresh() {
-    if ($logStepUUID) {
-      const idx = $selectedSteps.findIndex(s => s.uuid === $logStepUUID);
-      if (idx >= 0) loadLog(idx);
-    }
-  }
+  function handleRefresh() { if ($logStepUUID) { const idx = $selectedSteps.findIndex(s => s.uuid === $logStepUUID); if (idx >= 0) loadLog(idx); } }
 
   function startAutoRefresh(stepIndex) {
     stopAutoRefresh();
@@ -363,21 +120,13 @@
     if (!step) return;
     if (step.state?.name === 'IN_PROGRESS' || step.state?.name === 'PENDING') {
       autoRefreshInterval = setInterval(() => {
-        if (logState !== 'loading') {
-          loadLog(stepIndex);
-        }
+        if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) { stopAutoRefresh(); return; }
+        if (logState !== 'loading') loadLog(stepIndex);
       }, 5000);
     }
   }
 
-  function stopAutoRefresh() {
-    if (autoRefreshInterval) {
-      clearInterval(autoRefreshInterval);
-      autoRefreshInterval = null;
-    }
-  }
-
-  let logLoadedForStep = null;
+  function stopAutoRefresh() { if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; } }
 
   $effect(() => {
     if ($selectedSteps.length === 0) return;
@@ -391,130 +140,65 @@
     startAutoRefresh(idx);
   });
 
-  onDestroy(() => {
-    stopAutoRefresh();
-  });
+  onDestroy(() => { stopAutoRefresh(); });
 
-  // ── Search navigation ──────────────────────────────────────────────────────
-
-  function nextMatch() {
-    if (matchCount === 0) return;
-    currentMatchIdx = (currentMatchIdx + 1) % matchCount;
-    scrollToLine(searchMatches[currentMatchIdx] + 1);
-  }
-
-  function prevMatch() {
-    if (matchCount === 0) return;
-    currentMatchIdx = (currentMatchIdx - 1 + matchCount) % matchCount;
-    scrollToLine(searchMatches[currentMatchIdx] + 1);
-  }
-
-  function clearSearch() {
-    searchTerm = '';
-    searchMode = false;
-    currentMatchIdx = -1;
-    matchCount = 0;
-  }
-
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  function nextMatch() { if (matchCount === 0) return; currentMatchIdx = (currentMatchIdx + 1) % matchCount; scrollToLine(searchMatches[currentMatchIdx] + 1); }
+  function prevMatch() { if (matchCount === 0) return; currentMatchIdx = (currentMatchIdx - 1 + matchCount) % matchCount; scrollToLine(searchMatches[currentMatchIdx] + 1); }
+  function clearSearch() { searchTerm = ''; searchMode = false; currentMatchIdx = -1; matchCount = 0; }
 
   function handleKeydown(e) {
     if (searchMode) {
       if (e.key === 'Escape') { clearSearch(); e.preventDefault(); return; }
-      if (e.key === 'Enter') {
-        searchMode = false;
-        if (matchCount > 0) {
-          currentMatchIdx = 0;
-          scrollToLine(searchMatches[0] + 1);
-        }
-        e.preventDefault();
-        return;
-      }
-      return; // Let the input handle text
-    }
-
-    // Global shortcuts for log viewer
-    if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      searchMode = true;
-      searchTerm = '';
-      setTimeout(() => {
-        const input = document.querySelector('.search-input');
-        if (input) input.focus();
-      }, 50);
+      if (e.key === 'Enter') { searchMode = false; if (matchCount > 0) { currentMatchIdx = 0; scrollToLine(searchMatches[0] + 1); } e.preventDefault(); return; }
       return;
     }
-    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && matchCount > 0) {
-      e.preventDefault();
-      nextMatch();
-      return;
-    }
-    if (e.key === 'N' && !e.ctrlKey && !e.metaKey && matchCount > 0) {
-      e.preventDefault();
-      prevMatch();
-      return;
-    }
-    if (e.key === 'Escape') {
-      if (matchCount > 0) {
-        clearSearch();
-        e.preventDefault();
-      } else {
-        navigateTo('detail', $selectedPipeline?.uuid);
-      }
-      return;
-    }
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); searchMode = true; searchTerm = ''; setTimeout(() => { const inp = document.querySelector('.search-input'); if (inp) inp.focus(); }, 50); return; }
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && matchCount > 0) { e.preventDefault(); nextMatch(); return; }
+    if (e.key === 'N' && !e.ctrlKey && !e.metaKey && matchCount > 0) { e.preventDefault(); prevMatch(); return; }
+    if (e.key === 'Escape') { if (matchCount > 0) { clearSearch(); e.preventDefault(); } else { navigateTo('detail', $selectedPipeline?.uuid); } return; }
   }
-
-  // ── Copy to clipboard ──────────────────────────────────────────────────────
 
   let copyMsg = $state('');
-  async function copyLog() {
-    try {
-      await navigator.clipboard.writeText($logContent || '');
-      copyMsg = 'Copied!';
-      setTimeout(() => { copyMsg = ''; }, 2000);
-    } catch {
-      copyMsg = 'Failed';
-    }
-  }
+  async function copyLog() { try { await navigator.clipboard.writeText($logContent || ''); copyMsg = 'Copied!'; setTimeout(() => { copyMsg = ''; }, 2000); } catch { copyMsg = 'Failed'; } }
+  function onScroll(e) { const el = e.currentTarget; autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 30; }
 
-  // ── Track manual scroll to toggle auto-scroll ──────────────────────────────
-
-  function onScroll(e) {
-    const el = e.currentTarget;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
-    autoScroll = atBottom;
+  function stepDotClass(state) {
+    const name = state?.name;
+    if (name === 'SUCCESSFUL') return 'dot-success';
+    if (name === 'FAILED' || name === 'ERROR') return 'dot-error';
+    if (name === 'IN_PROGRESS') return 'dot-running';
+    if (name === 'STOPPED' || name === 'PAUSED' || name === 'EXPIRED') return 'dot-stopped';
+    return 'dot-pending';
   }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="pipeline-log">
-  <div class="log-header">
-    <button class="btn btn-secondary" onclick={() => navigateTo('detail', $selectedPipeline?.uuid)}>
-      ← Back to detail
+  <!-- Log Toolbar -->
+  <div class="log-toolbar">
+    <button class="btn btn-ghost" onclick={() => navigateTo('detail', $selectedPipeline?.uuid)}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      Back
     </button>
-    <div class="log-title">
-      <h2>Log: {$logStepName || 'Step Log'}</h2>
-      <span class="log-pipe-info">Pipeline #{$selectedPipeline?.build_number || '—'}</span>
+    <div class="log-toolbar-title">
+      <span class="log-title-text">{$logStepName || 'Step Log'}</span>
+      {#if autoRefreshInterval}
+        <span class="log-auto-tag">auto-refreshing</span>
+      {/if}
     </div>
+    <div class="log-toolbar-spacer"></div>
     <div class="log-actions">
-      <button class="btn btn-secondary" onclick={copyLog} title="Copy full log to clipboard">
-        📋 {copyMsg || 'Copy'}
-      </button>
-      <button class="btn btn-secondary" onclick={() => (wrapLines = !wrapLines)} title="Toggle word wrap">
-        {wrapLines ? '📏 Wrap' : '↔️ No wrap'}
-      </button>
-      <button class="btn btn-secondary" onclick={() => { autoScroll = true; if (logViewerEl) logViewerEl.scrollTop = logViewerEl.scrollHeight; }} title="Scroll to bottom">
-        ⬇ Bottom
-      </button>
-      <button class="btn btn-secondary" onclick={handleRefresh}>
-        🔄 Refresh
-      </button>
+      <button class="btn btn-secondary btn-sm" onclick={copyLog} title="Copy full log">{copyMsg || 'Copy'}</button>
+      <button class="btn btn-secondary btn-sm" onclick={() => (wrapLines = !wrapLines)} title="Toggle word wrap">{wrapLines ? 'Wrap' : 'No wrap'}</button>
+      <button class="btn btn-secondary btn-sm" onclick={() => { autoScroll = true; if (logViewerEl) logViewerEl.scrollTop = logViewerEl.scrollHeight; }} title="Scroll to bottom">Bottom</button>
+      <button class="btn btn-secondary btn-sm" onclick={handleRefresh}>Refresh</button>
     </div>
   </div>
 
-  <!-- Step selector tabs -->
+  <!-- Step Tabs -->
   {#if $selectedSteps.length > 0}
     <div class="step-tabs">
       {#each $selectedSteps as step, i}
@@ -527,67 +211,50 @@
             navigateTo('logs', $selectedPipeline?.uuid, i);
           }}
         >
-          <span class="tab-icon">
-            {#if step.state?.name === 'COMPLETED'}
-              ✅
-            {:else if step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
-              ❌
-            {:else if step.state?.name === 'IN_PROGRESS' || step.state?.name === 'PENDING'}
-              🔄
-            {:else}
-              ⬜
-            {/if}
-          </span>
+          <span class="step-tab-dot {stepDotClass(step.state)}"></span>
           {step.name || `Step ${i + 1}`}
         </button>
       {/each}
     </div>
   {/if}
 
-  <!-- Search bar -->
+  <!-- Search Bar -->
   {#if searchMode}
-    <div class="search-bar">
-      <span class="search-icon">🔍</span>
-      <input
-        class="search-input"
-        type="text"
-        bind:value={searchTerm}
-        placeholder="Search log… (Enter to confirm, Esc to cancel)"
-        autofocus
-      />
-      <button class="btn btn-tiny" onclick={clearSearch}>✕</button>
+    <div class="search-bar search-bar--active">
+      <svg class="search-bar-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input class="search-input" type="text" bind:value={searchTerm} placeholder="Search log… (Enter to confirm, Esc to cancel)" autofocus />
+      <button class="btn btn-ghost btn-icon" onclick={clearSearch}>✕</button>
     </div>
   {:else if searchTerm}
-    <div class="search-bar search-bar--results">
-      <span class="search-icon">🔍</span>
+    <div class="search-bar">
+      <svg class="search-bar-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
       <span class="search-term-text">"{searchTerm}"</span>
       {#if matchCount > 0}
-        <span class="search-match-count">Match {currentMatchIdx + 1} of {matchCount}</span>
-        <button class="btn btn-tiny" onclick={prevMatch} title="Previous match (Shift+N)">▲</button>
-        <button class="btn btn-tiny" onclick={nextMatch} title="Next match (N)">▼</button>
+        <span class="search-info">Match {currentMatchIdx + 1} of {matchCount}</span>
+        <button class="btn btn-ghost btn-icon" onclick={prevMatch} title="Previous (Shift+N)">▲</button>
+        <button class="btn btn-ghost btn-icon" onclick={nextMatch} title="Next (N)">▼</button>
       {/if}
-      <button class="btn btn-tiny" onclick={clearSearch}>✕</button>
+      <button class="btn btn-ghost btn-icon" onclick={clearSearch}>✕</button>
     </div>
   {/if}
 
   {#if logState === 'loading'}
-    <div class="loading-state">
+    <div class="log-loading">
       <div class="spinner"></div>
-      <p>Loading log...</p>
+      <p>Loading log…</p>
     </div>
   {:else if logState === 'error'}
-    <div class="error-state">
-      <p>❌ {logError}</p>
-      <button class="btn btn-secondary" onclick={handleRefresh}>Retry</button>
+    <div class="log-error">
+      <span class="empty-icon">⚠</span>
+      <p>{logError}</p>
+      <button class="btn btn-primary" onclick={handleRefresh}>Retry</button>
     </div>
   {:else}
-    <div
-      class="log-viewer"
-      class:wrap-lines={wrapLines}
-      class:no-wrap={!wrapLines}
-      bind:this={logViewerEl}
-      onscroll={onScroll}
-    >
+    <div class="log-viewer" class:wrap-lines={wrapLines} class:no-wrap={!wrapLines} bind:this={logViewerEl} onscroll={onScroll}>
       <div class="log-lines">
         {#each coloredLines as line (line.num)}
           <div class="log-line" class:search-match={searchMatches.includes(line.num - 1) && currentMatchIdx >= 0 && searchMatches[currentMatchIdx] === line.num - 1}>
@@ -598,302 +265,201 @@
       </div>
     </div>
 
-    <!-- Status bar -->
-    <div class="status-bar">
-      <span>{totalLines} lines</span>
-      {#if autoScroll}
-        <span class="status-badge">📌 Auto-scroll ON</span>
-      {:else}
-        <span class="status-badge status-badge--dim">Auto-scroll OFF</span>
-      {/if}
-      <span class="status-help">/ search · n next · N prev · Esc dismiss</span>
+    <div class="log-statusbar">
+      <span>{coloredLines.length} lines</span>
+      <span class:status-on={autoScroll}>{autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF'}</span>
+      <span class="statusbar-help">/ search · n next · N prev · Esc back</span>
     </div>
   {/if}
 </div>
-
 <style>
   .pipeline-log {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-4);
+    padding: var(--space-6);
+    height: 100%;
   }
 
-  .log-header {
+  /* ── Toolbar ────────────────────────────────────────────── */
+  .log-toolbar {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: var(--space-4);
+    flex-shrink: 0;
+    user-select: none;
   }
 
-  .log-title {
+  .log-toolbar-title {
     display: flex;
     align-items: baseline;
-    gap: 0.75rem;
+    gap: var(--space-4);
   }
 
-  .log-title h2 {
-    font-size: 1.3rem;
+  .log-title-text {
+    font-size: var(--font-size-md);
     font-weight: 600;
-    margin: 0;
+    color: var(--text-primary);
   }
 
-  .log-pipe-info {
-    color: #71767b;
-    font-size: 0.85rem;
+  .log-auto-tag {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent-text);
+    background: var(--accent-muted);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
   }
+
+  .log-toolbar-spacer { flex: 1; }
 
   .log-actions {
-    margin-left: auto;
     display: flex;
-    gap: 0.35rem;
-    flex-wrap: wrap;
+    gap: var(--space-3);
   }
 
-  .btn {
-    padding: 0.5rem 0.85rem;
-    border: none;
-    border-radius: 9999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    white-space: nowrap;
-  }
-
-  .btn-secondary {
-    background: #21262d;
-    color: #c9d1d9;
-    border: 1px solid #30363d;
-  }
-
-  .btn-secondary:hover {
-    background: #30363d;
-  }
-
-  .btn-tiny {
-    padding: 0.15rem 0.45rem;
-    font-size: 0.7rem;
-    background: #21262d;
-    color: #8b949e;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .btn-tiny:hover {
-    background: #30363d;
-    color: #c9d1d9;
-  }
-
+  /* ── Step Tabs ──────────────────────────────────────────── */
   .step-tabs {
     display: flex;
-    gap: 0.25rem;
+    gap: var(--space-2);
     overflow-x: auto;
-    padding-bottom: 0.25rem;
+    padding-bottom: var(--space-1);
+    flex-shrink: 0;
   }
 
   .step-tab {
-    background: #16181c;
-    border: 1px solid #2f3336;
-    color: #71767b;
-    padding: 0.4rem 0.65rem;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.8rem;
-    white-space: nowrap;
-    transition: all 0.15s;
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-2);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-tertiary);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+    font-family: var(--font-ui);
   }
+  .step-tab:hover { color: var(--text-primary); border-color: var(--border-default); }
+  .step-tab.active { background: var(--accent-muted); border-color: var(--accent); color: var(--accent-text); }
 
-  .step-tab:hover {
-    background: #1a1d23;
-    color: #e7e9ea;
+  .step-tab-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
+  .dot-success { background: var(--success); }
+  .dot-error   { background: var(--error); }
+  .dot-running { background: var(--accent-text); animation: pulse-dot 1.5s ease-in-out infinite; }
+  .dot-stopped { background: var(--border-emphasis); }
+  .dot-pending { background: var(--border-default); }
+  @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.7)} }
 
-  .step-tab.active {
-    background: #1d2e3e;
-    border-color: #1d9bf0;
-    color: #6cb6ff;
-  }
-
-  .tab-icon { font-size: 0.7rem; }
-
-  /* ── Search bar ───────────────────────────────────────────── */
-
+  /* ── Search Bar ──────────────────────────────────────────── */
   .search-bar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    background: #16181c;
-    border: 1px solid #1d9bf0;
-    border-radius: 10px;
-    padding: 0.4rem 0.75rem;
+    gap: var(--space-4);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-5);
+    flex-shrink: 0;
   }
+  .search-bar--active { border-color: var(--accent); }
 
-  .search-bar--results {
-    border-color: #30363d;
-  }
-
-  .search-icon {
-    font-size: 0.85rem;
-  }
+  .search-bar-icon { color: var(--text-tertiary); flex-shrink: 0; }
 
   .search-input {
     flex: 1;
-    background: transparent;
+    background: none;
     border: none;
-    color: #e7e9ea;
-    font-family: inherit;
-    font-size: 0.85rem;
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: var(--font-size-sm);
     outline: none;
   }
+  .search-input::placeholder { color: var(--text-tertiary); }
 
-  .search-input::placeholder {
-    color: #484f58;
+  .search-term-text { color: var(--accent-text); font-size: var(--font-size-sm); }
+  .search-info { color: var(--success); font-size: var(--font-size-xs); font-family: var(--font-mono); }
+
+  /* ── Loading / Error ─────────────────────────────────────── */
+  .log-loading, .log-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-4);
+    padding: var(--space-9);
+    color: var(--text-secondary);
   }
 
-  .search-term-text {
-    color: #6cb6ff;
-    font-size: 0.85rem;
-  }
-
-  .search-match-count {
-    color: #7ee787;
-    font-size: 0.8rem;
-    margin-left: 0.5rem;
-  }
-
-  /* ── Loading / Error ──────────────────────────────────────── */
-
-  .loading-state, .error-state {
-    text-align: center;
-    padding: 3rem;
-    background: #16181c;
-    border-radius: 12px;
-    border: 1px solid #2f3336;
-    color: #71767b;
-  }
-
-  .spinner {
-    width: 30px;
-    height: 30px;
-    border: 3px solid #2f3336;
-    border-top: 3px solid #1d9bf0;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin: 0 auto 0.5rem;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ── Log viewer (terminal-like) ───────────────────────────── */
-
+  /* ── Log Viewer (terminal) ────────────────────────────────── */
   .log-viewer {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 10px;
+    flex: 1;
+    background: var(--terminal-bg);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
     overflow-y: auto;
     overflow-x: hidden;
-    max-height: 65vh;
-    min-height: 300px;
+    min-height: 0;
+    font-family: var(--font-mono);
   }
+  .log-viewer.no-wrap { overflow-x: auto; }
+  .log-viewer.no-wrap .log-line { min-width: max-content; }
+  .wrap-lines .line-content { white-space: pre-wrap; word-break: break-word; }
+  .no-wrap .line-content { white-space: pre; }
 
-  .log-viewer.wrap-lines .line-content {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .log-viewer.no-wrap {
-    overflow-x: auto;
-  }
-
-  .log-viewer.no-wrap .line-content {
-    white-space: pre;
-  }
-
-  .log-viewer.no-wrap .log-line {
-    min-width: max-content;
-  }
-
-  .log-lines {
-    padding: 0.5rem 0;
-  }
+  .log-lines { padding: var(--space-3) 0; }
 
   .log-line {
     display: flex;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
-    font-size: 0.8rem;
-    line-height: 1.6;
-    min-height: 1.6em;
-    color: #e6edf3;
+    font-size: 12px;
+    line-height: 1.55;
+    min-height: 1.55em;
+    color: var(--text-primary);
   }
-
-  .log-line:hover {
-    background: #161b22;
-  }
-
-  .log-line.search-match {
-    background: #1a2332;
-    outline: 1px solid #1f6feb;
-    outline-offset: -1px;
-  }
+  .log-line:hover { background: var(--bg-hover); }
+  .log-line.search-match { background: var(--accent-muted); outline: 1px solid var(--accent); outline-offset: -1px; }
 
   .line-num {
     flex-shrink: 0;
-    width: 3.5rem;
+    width: 3.2rem;
     text-align: right;
-    padding-right: 0.75rem;
-    color: #484f58;
+    padding-right: var(--space-4);
+    color: var(--text-tertiary);
     user-select: none;
-    border-right: 1px solid #21262d;
-    margin-right: 0.75rem;
+    border-right: 1px solid var(--border-subtle);
+    margin-right: var(--space-4);
   }
 
-  .line-content {
-    flex: 1;
-    min-width: 0;
-    padding-right: 0.75rem;
-  }
-
-  /* ── Scrollbar ────────────────────────────────────────────── */
+  .line-content { flex: 1; min-width: 0; padding-right: var(--space-5); }
 
   .log-viewer::-webkit-scrollbar { width: 8px; height: 8px; }
-  .log-viewer::-webkit-scrollbar-track { background: #0d1117; }
-  .log-viewer::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-  .log-viewer::-webkit-scrollbar-thumb:hover { background: #484f58; }
+  .log-viewer::-webkit-scrollbar-track { background: var(--terminal-bg); }
+  .log-viewer::-webkit-scrollbar-thumb { background: var(--border-emphasis); border-radius: 4px; }
 
-  /* ── Status bar ───────────────────────────────────────────── */
-
-  .status-bar {
+  /* ── Status Bar ──────────────────────────────────────────── */
+  .log-statusbar {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.35rem 0.75rem;
-    background: #16181c;
-    border: 1px solid #21262d;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    color: #8b949e;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    gap: var(--space-5);
+    padding: var(--space-2) var(--space-5);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+    user-select: none;
   }
 
-  .status-badge {
-    color: #7ee787;
-    font-weight: 600;
-  }
+  .statusbar-help { margin-left: auto; }
+  .status-on { color: var(--success); font-weight: 600; }
 
-  .status-badge--dim {
-    color: #484f58;
-  }
-
-  .status-help {
-    margin-left: auto;
-    color: #484f58;
-  }
-
-  @keyframes blink {
-    50% { opacity: 0; }
-  }
+  @keyframes blink { 50% { opacity: 0; } }
 </style>

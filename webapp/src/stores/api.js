@@ -38,8 +38,11 @@ export function listPipelines(projectId, params = {}) {
   // Strip empty/falsy values to avoid sending e.g. filter=&sort=-created_on
   const clean = {};
   for (const [k, v] of Object.entries(params)) {
-    if (v) clean[k] = v;
+    if (v != null && v !== '') clean[k] = v;
   }
+  // Request 50 pipelines per page by default (Bitbucket API max) for snappy
+  // infinite-scroll experience instead of small paginated pages.
+  if (!clean.pagelen) clean.pagelen = 50;
   const q = new URLSearchParams(clean).toString();
   return request(`/projects/${projectId}/pipelines${q ? '?' + q : ''}`);
 }

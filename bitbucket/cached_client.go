@@ -64,6 +64,9 @@ func (cc *CachedClient) ListPipelines(workspace, repoSlug string, params *ListPi
 		if params.Fields != "" {
 			q.Set("fields", params.Fields)
 		}
+		if params.Filter != "" {
+			q.Set("q", params.Filter)
+		}
 	}
 	path := basePath
 	if len(q) > 0 {

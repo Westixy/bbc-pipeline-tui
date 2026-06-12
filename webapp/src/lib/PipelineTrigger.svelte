@@ -10,7 +10,6 @@
   let running = $state(false);
   let showPreFilled = $state(false);
 
-  // Check whether we have pre-filled data from a previous pipeline detail
   let isRunAgain = $derived(
     Boolean($triggerPreTarget) || ($triggerPreVars && $triggerPreVars.length > 0)
   );
@@ -78,92 +77,102 @@
 </script>
 
 <div class="trigger-pipeline">
-  <div class="trigger-header">
-    <button class="btn btn-secondary" onclick={() => navigateTo('list')}>
-      ← Back to list
+  <div class="toolbar trigger-toolbar">
+    <button class="btn btn-ghost" onclick={() => navigateTo('list')}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      Back
     </button>
-    <h2>Trigger Pipeline</h2>
+    <h2 class="toolbar-title">Trigger Pipeline</h2>
+    <div class="toolbar-spacer"></div>
     {#if isRunAgain}
-      <span class="run-again-badge">🔁 Run again — pre-filled from previous pipeline</span>
+      <span class="run-again-badge">Pre-filled from previous pipeline</span>
     {/if}
   </div>
 
   <form class="trigger-form" onsubmit={handleRun}>
-    <div class="trigger-card">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="trigger-target">Target Branch *</label>
-          <input
-            id="trigger-target"
-            type="text"
-            class="form-input"
-            placeholder="e.g. main, develop, feature/xyz"
-            bind:value={targetBranch}
-            required
-          />
-          <span class="form-hint">The git branch to run the pipeline against</span>
+    <div class="panel trigger-panel">
+      <div class="panel-body" style="gap: var(--space-6)">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="trigger-target">Target Branch *</label>
+            <input
+              id="trigger-target"
+              type="text"
+              class="form-input"
+              placeholder="e.g. main, develop, feature/xyz"
+              bind:value={targetBranch}
+              required
+            />
+            <span class="form-hint">The git branch to run the pipeline against</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="trigger-selector">Pipeline Selector</label>
+            <input
+              id="trigger-selector"
+              type="text"
+              class="form-input"
+              placeholder="e.g. default, custom-pattern (optional)"
+              bind:value={pipelineSelector}
+            />
+            <span class="form-hint">Filter which pipeline steps to execute</span>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="trigger-selector">Pipeline Selector (optional)</label>
-          <input
-            id="trigger-selector"
-            type="text"
-            class="form-input"
-            placeholder="e.g. default, custom-pattern"
-            bind:value={pipelineSelector}
-          />
-          <span class="form-hint">Filter which pipeline steps to execute</span>
+        <div class="variables-section">
+          <div class="variables-header">
+            <h3 class="text-sm text-primary fw-600">Variables</h3>
+            <button type="button" class="btn btn-secondary btn-sm" onclick={addVariableRow}>
+              + Add Variable
+            </button>
+          </div>
+          {#if variables.length === 0}
+            <p class="empty-text">No custom variables. Click "+ Add Variable" to add one.</p>
+          {:else}
+            <div class="variables-list">
+              {#each variables as v, i}
+                <div class="variable-row">
+                  <input
+                    type="text"
+                    class="form-input var-key"
+                    placeholder="Key"
+                    aria-label="Variable key"
+                    value={v.key}
+                    oninput={(e) => updateVariableKey(i, e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    class="form-input var-value"
+                    placeholder="Value"
+                    aria-label="Variable value"
+                    value={v.value}
+                    oninput={(e) => updateVariableValue(i, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-remove"
+                    onclick={() => removeVariable(i)}
+                    title="Remove variable"
+                  >
+                    ✕
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
-      </div>
 
-      <div class="variables-section">
-        <div class="variables-header">
-          <h3>Variables</h3>
-          <button type="button" class="btn btn-small" onclick={addVariableRow}>
-            + Add Variable
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" disabled={running}>
+            {#if running}
+              <span class="spinner"></span> Running…
+            {:else}
+              ▶ Run Pipeline
+            {/if}
           </button>
         </div>
-        {#if variables.length === 0}
-          <p class="empty-text">No custom variables. Click "+ Add Variable" to add one.</p>
-        {:else}
-          <div class="variables-list">
-            {#each variables as v, i}
-              <div class="variable-row">
-                <input
-                  type="text"
-                  class="form-input var-key"
-                  placeholder="Key"
-                  aria-label="Variable key"
-                  value={v.key}
-                  oninput={(e) => updateVariableKey(i, e.target.value)}
-                />
-                <input
-                  type="text"
-                  class="form-input var-value"
-                  placeholder="Value"
-                  aria-label="Variable value"
-                  value={v.value}
-                  oninput={(e) => updateVariableValue(i, e.target.value)}
-                />
-                <button
-                  type="button"
-                  class="btn btn-icon btn-remove"
-                  onclick={() => removeVariable(i)}
-                  title="Remove variable"
-                >
-                  ✕
-                </button>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary btn-run" disabled={running}>
-          {running ? '⏳ Running...' : '▶ Run Pipeline'}
-        </button>
       </div>
     </div>
   </form>
@@ -173,100 +182,44 @@
   .trigger-pipeline {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: var(--space-5);
+    padding: var(--space-6);
+    height: 100%;
+    overflow-y: auto;
   }
 
-  .trigger-header {
+  .trigger-toolbar {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+    gap: var(--space-4);
+    flex-shrink: 0;
   }
 
-  .trigger-header h2 {
-    font-size: 1.3rem;
+  .toolbar-title {
+    font-size: var(--font-size-md);
     font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
   }
+
+  .toolbar-spacer { flex: 1; }
 
   .run-again-badge {
-    background: #1d2e3e;
-    color: #6cb6ff;
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
-    font-size: 0.8rem;
+    background: var(--accent-muted);
+    color: var(--accent-text);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-xs);
     font-weight: 500;
   }
 
-  .btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 9999px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    white-space: nowrap;
-  }
-
-  .btn-secondary {
-    background: #2f3336;
-    color: #e7e9ea;
-  }
-
-  .btn-secondary:hover { background: #3e4144; }
-
-  .btn-primary {
-    background: #1d9bf0;
-    color: #fff;
-  }
-
-  .btn-primary:hover { background: #1a8cd8; }
-  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-small {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.8rem;
-    background: #2f3336;
-    color: #e7e9ea;
-    border: none;
-    border-radius: 9999px;
-    cursor: pointer;
-  }
-
-  .btn-small:hover { background: #3e4144; }
-
-  .btn-icon {
-    background: none;
-    border: none;
-    color: #8b949e;
-    font-size: 1rem;
-    cursor: pointer;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    line-height: 1;
-  }
-
-  .btn-icon:hover { background: #2f3336; color: #f85149; }
-
-  .trigger-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .trigger-card {
-    background: #16181c;
-    border: 1px solid #2f3336;
-    border-radius: 12px;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
+  .trigger-panel {
+    max-width: 720px;
   }
 
   .form-row {
     display: flex;
-    gap: 1.5rem;
+    gap: var(--space-5);
     flex-wrap: wrap;
   }
 
@@ -275,45 +228,13 @@
     min-width: 200px;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .form-label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #8b949e;
-  }
-
-  .form-hint {
-    font-size: 0.72rem;
-    color: #484f58;
-  }
-
-  .form-input {
-    background: #0d1117;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    color: #e7e9ea;
-    font-size: 0.9rem;
-    outline: none;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .form-input:focus { border-color: #1d9bf0; }
-  .form-input::placeholder { color: #484f58; }
-
-  h3 {
-    font-size: 1rem;
-    color: #e7e9ea;
-    margin: 0;
+    gap: var(--space-3);
   }
 
   .variables-section {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-5);
   }
 
   .variables-header {
@@ -323,33 +244,39 @@
   }
 
   .empty-text {
-    color: #71767b;
+    color: var(--text-tertiary);
     font-style: italic;
+    font-size: var(--font-size-sm);
+    padding: var(--space-4) 0;
   }
 
   .variables-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-3);
   }
 
   .variable-row {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-3);
     align-items: center;
   }
 
   .var-key { flex: 1; }
   .var-value { flex: 2; }
 
-  .btn-remove { flex-shrink: 0; }
+  .btn-remove {
+    flex-shrink: 0;
+    font-size: 16px;
+    color: var(--text-tertiary);
+    padding: var(--space-2);
+  }
+  .btn-remove:hover { color: var(--error); background: var(--bg-hover); }
 
   .form-actions {
     display: flex;
     justify-content: flex-end;
-    border-top: 1px solid #2f3336;
-    padding-top: 1rem;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: var(--space-5);
   }
-
-  .btn-run { padding: 0.6rem 2rem; }
 </style>

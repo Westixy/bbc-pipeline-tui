@@ -27,8 +27,10 @@
     class:error={$notification.type === 'error'}
     class:success={$notification.type === 'success'}
     transition:fly={{ x: 360, duration: 300, opacity: 0 }}
+    role="alert"
+    aria-live="polite"
   >
-    <span class="icon">{$notification.type === 'error' ? '✕' : '✓'}</span>
+    <span class="icon">{$notification.type === 'error' ? '⚠' : '✓'}</span>
     <span class="message">{$notification.message}</span>
     <button
       class="dismiss-btn"
