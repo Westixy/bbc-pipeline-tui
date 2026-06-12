@@ -92,11 +92,15 @@
   }
 
   function viewDetail(pipeline) {
+    // Navigate FIRST so $page changes before we set stores.
+    // Otherwise PipelineDetail's cleanup $effect can see $page==='list'
+    // and clear the pipeline we just set.
+    navigateTo('detail', pipeline.uuid);
     selectedPipeline.set(pipeline);
     selectedSteps.set([]);
     selectedVariables.set([]);
+    selectedLogVariables.set([]);
     detailState.set('loading');
-    navigateTo('detail', pipeline.uuid);
   }
 
   function statusToBadgeClass(state) {

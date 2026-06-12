@@ -4,13 +4,14 @@
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
   import { page, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo } from '../stores/router.js';
   import { getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
-  import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState } from './utils.js';
+  import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState, resolveStepStatus } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
 
   let stopping = $state(false);
   let running = $state(false);
   let autoRefreshRunning = $state(false);
   let autoRefreshInterval = null;
+  let autoRefreshPipelineUuid = null;
   let elapsedInterval = null;
   let lastRefreshed = $state(null);
   let showStopConfirm = $state(false);
@@ -38,9 +39,14 @@
 
   function startAutoRefresh() {
     if (autoRefreshInterval) return;
+    autoRefreshPipelineUuid = $selectedPipeline?.uuid;
     autoRefreshRunning = true;
     elapsedInterval = setInterval(updateElapsed, 1000);
     autoRefreshInterval = setInterval(() => {
+      if ($page !== 'detail' || $selectedPipeline?.uuid !== autoRefreshPipelineUuid) {
+        stopAutoRefresh();
+        return;
+      }
       const pipe = $selectedPipeline;
       if (pipe?.state?.name === 'IN_PROGRESS' || pipe?.state?.name === 'PENDING' || pipe?.state?.name === 'IN_PROGRESS_STOPPING') {
         loadDetail(true);
@@ -54,19 +60,57 @@
     if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
     if (elapsedInterval) { clearInterval(elapsedInterval); elapsedInterval = null; }
     autoRefreshRunning = false;
+    autoRefreshPipelineUuid = null;
   }
 
   onDestroy(() => { stopAutoRefresh(); });
 
+  let lastPipelineUuid = null;
+  let prevPage = $state(null);
+
+  // Stop auto-refresh and clean up when navigating away or switching pipelines
+  $effect(() => {
+    const currentUuid = $selectedPipeline?.uuid;
+    const currentPage = $page;
+    // Only clean up if we were previously on detail and left
+    if (prevPage === 'detail' && currentPage !== 'detail') {
+      stopAutoRefresh();
+      detailLoadedFor = null;
+      lastProjectId = null;
+      lastPipelineUuid = null;
+      bootstrapped = false;
+      selectedPipeline.set(null);
+      selectedSteps.set([]);
+      selectedVariables.set([]);
+      selectedLogVariables.set([]);
+      detailState.set('idle');
+    }
+    // Track pipeline UUID changes while staying on detail
+    if (currentPage === 'detail' && currentUuid && currentUuid !== lastPipelineUuid) {
+      stopAutoRefresh();
+      detailLoadedFor = null;
+    }
+    lastPipelineUuid = currentUuid;
+    prevPage = currentPage;
+    return stopAutoRefresh;
+  });
+
   async function loadDetail(silent = false) {
     if (!$activeProject || !$selectedPipeline?.uuid) return;
+    if ($page !== 'detail') return; // Don't refresh if user navigated away
     if (!silent) detailState.set('loading');
+    const fetchUuid = $selectedPipeline.uuid;
+    const fetchProjectId = $activeProject.id;
     try {
       const [pipeResp, varsResp, logVarsResp] = await Promise.all([
-        getPipeline($activeProject.id, $selectedPipeline.uuid),
-        listVariables($activeProject.id).catch(() => ({ variables: [] })),
-        getLogVariables($activeProject.id, $selectedPipeline.uuid).catch(() => ({ variables: [] })),
+        getPipeline(fetchProjectId, fetchUuid),
+        listVariables(fetchProjectId).catch(() => ({ variables: [] })),
+        getLogVariables(fetchProjectId, fetchUuid).catch(() => ({ variables: [] })),
       ]);
+
+      // Guard: don't update stores if user navigated away or switched pipelines during fetch
+      if ($page !== 'detail') return;
+      if ($selectedPipeline?.uuid !== fetchUuid || $activeProject?.id !== fetchProjectId) return;
 
       const pipelineData = pipeResp.pipeline || pipeResp;
       const stepsData = pipeResp.steps || [];
@@ -146,11 +190,11 @@
   }
 
   function stepDotClass(state) {
-    const name = state?.name;
-    if (name === 'SUCCESSFUL') return 'dot-success';
-    if (name === 'FAILED' || name === 'ERROR') return 'dot-error';
-    if (name === 'IN_PROGRESS') return 'dot-running';
-    if (name === 'STOPPED' || name === 'PAUSED' || name === 'EXPIRED') return 'dot-stopped';
+    const status = resolveStepStatus(state);
+    if (status === 'SUCCESSFUL') return 'dot-success';
+    if (status === 'FAILED') return 'dot-error';
+    if (status === 'IN_PROGRESS') return 'dot-running';
+    if (status === 'STOPPED') return 'dot-stopped';
     return 'dot-pending';
   }
 
@@ -165,11 +209,11 @@
   }
 
   function stepStatusBadgeClass(state) {
-    const name = state?.name || '';
-    if (name === 'SUCCESSFUL') return 'badge-success';
-    if (name === 'FAILED' || name === 'ERROR') return 'badge-error';
-    if (name === 'IN_PROGRESS') return 'badge-info';
-    if (name === 'STOPPED' || name === 'PAUSED' || name === 'EXPIRED') return 'badge-warning';
+    const status = resolveStepStatus(state);
+    if (status === 'SUCCESSFUL') return 'badge-success';
+    if (status === 'FAILED') return 'badge-error';
+    if (status === 'IN_PROGRESS') return 'badge-info';
+    if (status === 'STOPPED') return 'badge-warning';
     return 'badge-neutral';
   }
 
@@ -206,6 +250,7 @@
   });
 
   async function loadDetailFromUrl(uuid) {
+    if ($page !== 'detail') return;
     detailState.set('loading');
     try {
       const [pipeResp, varsResp, logVarsResp] = await Promise.all([
@@ -243,17 +288,20 @@
     return () => window.removeEventListener('app:refresh', onRefresh);
   });
 
-  let completedSteps = $derived($selectedSteps.filter(s => s.state?.name === 'SUCCESSFUL' || s.state?.name === 'FAILED' || s.state?.name === 'ERROR' || s.state?.name === 'STOPPED').length);
+  let completedSteps = $derived($selectedSteps.filter(s => {
+    const st = resolveStepStatus(s.state);
+    return st === 'SUCCESSFUL' || st === 'FAILED' || st === 'STOPPED';
+  }).length);
   let totalSteps = $derived($selectedSteps.length);
   let pipelineRunning = $derived($selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING');
 
   let summaryItems = $derived.by(() => {
     const steps = $selectedSteps;
-    const succeeded = steps.filter(s => s.state?.name === 'SUCCESSFUL').length;
-    const failed = steps.filter(s => s.state?.name === 'FAILED' || s.state?.name === 'ERROR' || (s.state?.name === 'COMPLETED' && s.state?.result?.name === 'FAILED')).length;
-    const running = steps.filter(s => s.state?.name === 'IN_PROGRESS').length;
-    const pending = steps.filter(s => s.state?.name === 'PENDING' || s.state?.name === 'NOT_STARTED' || !s.state).length;
-    const stopped = steps.filter(s => s.state?.name === 'STOPPED' || s.state?.name === 'PAUSED' || s.state?.name === 'EXPIRED').length;
+    const succeeded = steps.filter(s => resolveStepStatus(s.state) === 'SUCCESSFUL').length;
+    const failed = steps.filter(s => resolveStepStatus(s.state) === 'FAILED').length;
+    const running = steps.filter(s => resolveStepStatus(s.state) === 'IN_PROGRESS').length;
+    const pending = steps.filter(s => resolveStepStatus(s.state) === 'PENDING').length;
+    const stopped = steps.filter(s => resolveStepStatus(s.state) === 'STOPPED').length;
     const items = [];
     if (succeeded > 0) items.push({ label: 'Done', count: succeeded, icon: 'check', cls: 'chip-success' });
     if (failed > 0) items.push({ label: 'Failed', count: failed, icon: 'x', cls: 'chip-error' });
@@ -439,14 +487,15 @@
 
         <div class="timeline-track">
           {#each $selectedSteps as step, i}
+            {@const stepStatus = resolveStepStatus(step.state)}
             <div class="timeline-step" style="flex: 1;">
               <button
                 class="timeline-step-node"
-                class:node-success={step.state?.name === 'SUCCESSFUL'}
-                class:node-failed={step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
-                class:node-running={step.state?.name === 'IN_PROGRESS'}
-                class:node-stopped={step.state?.name === 'STOPPED' || step.state?.name === 'PAUSED' || step.state?.name === 'EXPIRED'}
-                class:node-pending={step.state?.name === 'PENDING' || step.state?.name === 'NOT_STARTED' || !step.state}
+                class:node-success={stepStatus === 'SUCCESSFUL'}
+                class:node-failed={stepStatus === 'FAILED'}
+                class:node-running={stepStatus === 'IN_PROGRESS'}
+                class:node-stopped={stepStatus === 'STOPPED'}
+                class:node-pending={stepStatus === 'PENDING'}
                 onclick={() => {
                   if (step.state?.name !== 'NOT_STARTED') {
                     logStepName.set(step.name || `Step ${i + 1}`);
@@ -456,21 +505,20 @@
                 }}
                 title={stepNodeTitle(step, i)}
               >
-                {#if step.state?.name === 'SUCCESSFUL'}
+                {#if stepStatus === 'SUCCESSFUL'}
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                {:else if step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
+                {:else if stepStatus === 'FAILED'}
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                {:else if step.state?.name === 'IN_PROGRESS'}
+                {:else if stepStatus === 'IN_PROGRESS'}
                   <span class="node-spinner"></span>
-                {:else if step.state?.name === 'STOPPED' || step.state?.name === 'PAUSED' || step.state?.name === 'EXPIRED'}
+                {:else if stepStatus === 'STOPPED'}
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
                 {:else}
                   <span class="node-empty-dot"></span>
                 {/if}
               </button>
               {#if i < totalSteps - 1}
-                {@const term = step.state?.name}
-                <div class="timeline-connector" class:conn-done={term === 'SUCCESSFUL' || term === 'FAILED' || term === 'ERROR' || term === 'STOPPED'} class:conn-running={term === 'IN_PROGRESS'}></div>
+                <div class="timeline-connector" class:conn-done={stepStatus === 'SUCCESSFUL' || stepStatus === 'FAILED' || stepStatus === 'STOPPED'} class:conn-running={stepStatus === 'IN_PROGRESS'}></div>
               {/if}
               <div class="timeline-step-label-wrap">
                 <span class="timeline-step-num">#{i + 1}</span>
@@ -505,8 +553,8 @@
               {#each $selectedSteps as step, i}
                 <div
                   class="step-row"
-                  class:step-row-active={step.state?.name === 'IN_PROGRESS'}
-                  class:step-row-failed={step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
+                  class:step-row-active={resolveStepStatus(step.state) === 'IN_PROGRESS'}
+                  class:step-row-failed={resolveStepStatus(step.state) === 'FAILED'}
                 >
                   <div class="col-dot">
                     <span class="step-dot {stepDotClass(step.state)}"></span>
