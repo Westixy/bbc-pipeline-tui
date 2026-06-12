@@ -60,6 +60,26 @@ export function statusLabel(state) {
  * Returns a CSS class name for the given pipeline/step state.
  * Considers both state.name and state.result for COMPLETED pipelines.
  */
+/**
+ * Resolves a pipeline step state to a canonical status string.
+ * The Bitbucket API returns step states as COMPLETED with state.result.name
+ * indicating SUCCESSFUL/FAILED, not as direct SUCCESSFUL/FAILED names.
+ * Mirrors the TUI's resolveStepStatus logic in ui/helpers.go.
+ */
+export function resolveStepStatus(state) {
+  if (!state) return 'UNKNOWN';
+  const name = (state.name || '').toUpperCase();
+  if (name === 'IN_PROGRESS') return 'IN_PROGRESS';
+  if (name === 'PENDING') return 'PENDING';
+  if (name === 'COMPLETED') {
+    const result = (state.result?.name || '').toUpperCase();
+    if (result === 'SUCCESSFUL') return 'SUCCESSFUL';
+    if (result === 'FAILED' || result === 'ERROR') return 'FAILED';
+    return 'STOPPED';
+  }
+  return name;
+}
+
 export function statusClassForState(state) {
   if (!state) return 'status-pending';
   const name = (state.name || '').toLowerCase();

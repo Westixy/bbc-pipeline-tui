@@ -1,5 +1,6 @@
 <script>
   import { get } from 'svelte/store';
+  import { onDestroy } from 'svelte';
   import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
   import { listPipelines, getLogVariables, getPipeline } from '../stores/api.js';
@@ -158,6 +159,74 @@
   let lastLoaded = '';
   let selectedIndex = $state(null);
   let gridBody = $state(null);
+  let autoRefreshInterval = $state(null);
+
+  // ── Auto-refresh when running pipelines exist ──────────────────────
+  let hasRunningPipelines = $derived.by(() => {
+    return $pipelines.some(p => {
+      const name = p.state?.name;
+      return name === 'IN_PROGRESS' || name === 'PENDING' || name === 'IN_PROGRESS_STOPPING';
+    });
+  });
+
+  function startAutoRefresh() {
+    stopAutoRefresh();
+    autoRefreshInterval = setInterval(async () => {
+      // Only refresh if still on the list page and project is active
+      if ($page !== 'list' || !$activeProject) {
+        stopAutoRefresh();
+        return;
+      }
+      try {
+        // Fetch just the first page to check for state changes and new pipelines
+        const data = await listPipelines($activeProject.id, {
+          sort: get(listSort),
+          page: 1,
+        });
+        const fresh = data.values || [];
+        // Merge: update existing pipelines that match by uuid, prepend new ones
+        const existing = $pipelines;
+        const existingUuids = new Set(existing.map(p => p.uuid));
+        const merged = [];
+        // Updated/reordered from fresh page 1
+        for (const fp of fresh) {
+          if (existingUuids.has(fp.uuid)) {
+            merged.push(fp); // update in-place
+            existingUuids.delete(fp.uuid);
+          } else {
+            merged.push(fp); // new pipeline
+          }
+        }
+        // Keep any remaining older pipelines that weren't in fresh page 1
+        for (const ep of existing) {
+          if (existingUuids.has(ep.uuid)) merged.push(ep);
+        }
+        pipelines.set(merged);
+        pipelinesNext.set(data.next || '');
+        lastRefreshed = new Date();
+      } catch (_) {
+        // Silently ignore errors during auto-refresh
+      }
+    }, 15000); // every 15 seconds
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+      autoRefreshInterval = null;
+    }
+  }
+
+  // Start/stop auto-refresh based on running pipelines and page visibility
+  $effect(() => {
+    if ($page === 'list' && hasRunningPipelines && $activeProject) {
+      if (!autoRefreshInterval) startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+  });
+
+  onDestroy(() => stopAutoRefresh());
 
   // ── Hover popover for log variables ──────────────────────────────────
   let hoveredPipeline = $state(null);

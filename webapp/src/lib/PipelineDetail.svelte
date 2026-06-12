@@ -136,6 +136,15 @@
     setTimeout(() => (copiedHash = false), 2000);
   }
 
+  function stepNodeTitle(step, i) {
+    const name = step.name || `Step ${i + 1}`;
+    const status = statusLabel(step.state);
+    if (step.duration_in_seconds != null) {
+      return `${name} — ${status} — ${formatDurationCompact(step.duration_in_seconds || 0)}`;
+    }
+    return `${name} — ${status}`;
+  }
+
   function stepDotClass(state) {
     const name = state?.name;
     if (name === 'SUCCESSFUL') return 'dot-success';
@@ -234,9 +243,25 @@
     return () => window.removeEventListener('app:refresh', onRefresh);
   });
 
-  let completedSteps = $derived($selectedSteps.filter(s => s.state?.name === 'SUCCESSFUL' || s.state?.name === 'FAILED' || s.state?.name === 'STOPPED').length);
+  let completedSteps = $derived($selectedSteps.filter(s => s.state?.name === 'SUCCESSFUL' || s.state?.name === 'FAILED' || s.state?.name === 'ERROR' || s.state?.name === 'STOPPED').length);
   let totalSteps = $derived($selectedSteps.length);
   let pipelineRunning = $derived($selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING');
+
+  let summaryItems = $derived.by(() => {
+    const steps = $selectedSteps;
+    const succeeded = steps.filter(s => s.state?.name === 'SUCCESSFUL').length;
+    const failed = steps.filter(s => s.state?.name === 'FAILED' || s.state?.name === 'ERROR' || (s.state?.name === 'COMPLETED' && s.state?.result?.name === 'FAILED')).length;
+    const running = steps.filter(s => s.state?.name === 'IN_PROGRESS').length;
+    const pending = steps.filter(s => s.state?.name === 'PENDING' || s.state?.name === 'NOT_STARTED' || !s.state).length;
+    const stopped = steps.filter(s => s.state?.name === 'STOPPED' || s.state?.name === 'PAUSED' || s.state?.name === 'EXPIRED').length;
+    const items = [];
+    if (succeeded > 0) items.push({ label: 'Done', count: succeeded, icon: 'check', cls: 'chip-success' });
+    if (failed > 0) items.push({ label: 'Failed', count: failed, icon: 'x', cls: 'chip-error' });
+    if (running > 0) items.push({ label: 'Running', count: running, icon: 'loading', cls: 'chip-running' });
+    if (pending > 0) items.push({ label: 'Pending', count: pending, icon: 'pending', cls: 'chip-pending' });
+    if (stopped > 0) items.push({ label: 'Stopped', count: stopped, icon: 'clock', cls: 'chip-stopped' });
+    return items;
+  });
 
   // Default to log variables if they exist, fall back to pipeline variables
   let effectiveVarsTab = $derived.by(() => {
@@ -384,19 +409,76 @@
       {/if}
     </div>
 
-    <!-- Progress Bar ──────────────────────────────────────── -->
+    <!-- Pipeline Progress Timeline ──────────────────────── -->
     {#if totalSteps > 0}
-      <div class="progress-bar">
-        <div class="progress-segments">
-          {#each $selectedSteps as step}
-            <div
-              class="progress-segment {stepDotClass(step.state)}"
-              style="width: {100 / totalSteps}%"
-              title="{step.name || 'Step'}: {statusLabel(step.state)}"
-            ></div>
+      <div class="pipeline-timeline-section">
+        <div class="timeline-header">
+          <h3 class="timeline-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            Pipeline Progress
+          </h3>
+          <div class="timeline-summary">
+            {#each summaryItems as item}
+              <span class="summary-chip {item.cls}">
+                {#if item.icon === 'check'}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>{/if}
+                {#if item.icon === 'x'}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>{/if}
+                {#if item.icon === 'loading'}<span class="summary-spinner"></span>{/if}
+                {#if item.icon === 'pending'}<span class="summary-dot-pending"></span>{/if}
+                {#if item.icon === 'clock'}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>{/if}
+                {item.label}: <strong>{item.count}</strong>
+              </span>
+            {/each}
+          </div>
+          <span class="timeline-percentage" class:done={completedSteps === totalSteps}>
+            {#if completedSteps === totalSteps}✓{/if}
+            {completedSteps}/{totalSteps}
+          </span>
+        </div>
+
+        <div class="timeline-track">
+          {#each $selectedSteps as step, i}
+            <div class="timeline-step" style="flex: 1;">
+              <button
+                class="timeline-step-node"
+                class:node-success={step.state?.name === 'SUCCESSFUL'}
+                class:node-failed={step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
+                class:node-running={step.state?.name === 'IN_PROGRESS'}
+                class:node-stopped={step.state?.name === 'STOPPED' || step.state?.name === 'PAUSED' || step.state?.name === 'EXPIRED'}
+                class:node-pending={step.state?.name === 'PENDING' || step.state?.name === 'NOT_STARTED' || !step.state}
+                onclick={() => {
+                  if (step.state?.name !== 'NOT_STARTED') {
+                    logStepName.set(step.name || `Step ${i + 1}`);
+                    logStepUUID.set(step.uuid);
+                    navigateTo('logs', $selectedPipeline.uuid, i);
+                  }
+                }}
+                title={stepNodeTitle(step, i)}
+              >
+                {#if step.state?.name === 'SUCCESSFUL'}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                {:else if step.state?.name === 'FAILED' || step.state?.name === 'ERROR'}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                {:else if step.state?.name === 'IN_PROGRESS'}
+                  <span class="node-spinner"></span>
+                {:else if step.state?.name === 'STOPPED' || step.state?.name === 'PAUSED' || step.state?.name === 'EXPIRED'}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+                {:else}
+                  <span class="node-empty-dot"></span>
+                {/if}
+              </button>
+              {#if i < totalSteps - 1}
+                {@const term = step.state?.name}
+                <div class="timeline-connector" class:conn-done={term === 'SUCCESSFUL' || term === 'FAILED' || term === 'ERROR' || term === 'STOPPED'} class:conn-running={term === 'IN_PROGRESS'}></div>
+              {/if}
+              <div class="timeline-step-label-wrap">
+                <span class="timeline-step-num">#{i + 1}</span>
+                <span class="timeline-step-name">{step.name || ''}</span>
+              </div>
+            </div>
           {/each}
         </div>
-        <span class="progress-label">{completedSteps}/{totalSteps} steps</span>
       </div>
     {/if}
 
@@ -775,47 +857,223 @@
     color: var(--text-secondary);
   }
 
-  /* ── Progress Bar ───────────────────────────────────────── */
-  .progress-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    padding: 0 var(--space-6);
-    margin: var(--space-4) 0;
+  /* ── Pipeline Progress Timeline ─────────────────────────── */
+  .pipeline-timeline-section {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: var(--space-4) var(--space-6);
     flex-shrink: 0;
   }
 
-  .progress-segments {
+  .timeline-header {
     display: flex;
-    flex: 1;
-    gap: 2px;
-    height: 4px;
-    border-radius: 2px;
-    overflow: hidden;
+    align-items: center;
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+    flex-wrap: wrap;
   }
 
-  .progress-segment {
-    height: 100%;
-    border-radius: 1px;
-    transition: background-color 0.3s;
-  }
-  .progress-segment.dot-success { background: var(--success); }
-  .progress-segment.dot-error   { background: var(--error); }
-  .progress-segment.dot-running { background: var(--accent-text); animation: shimmer-progress 1.5s ease-in-out infinite; background-size: 200% 100%; background-image: linear-gradient(90deg, var(--accent-text) 25%, #7fc8ff 50%, var(--accent-text) 75%); }
-  .progress-segment.dot-stopped { background: var(--border-emphasis); }
-  .progress-segment.dot-pending { background: var(--bg-input); }
-
-  @keyframes shimmer-progress {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-
-  .progress-label {
-    font-size: 10px;
-    color: var(--text-tertiary);
+  .timeline-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--font-size-xs);
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .timeline-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    flex: 1;
+  }
+
+  .summary-chip {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-ui);
     white-space: nowrap;
+  }
+  .summary-chip.chip-success { background: rgba(52,211,153,0.12); color: var(--success); }
+  .summary-chip.chip-error   { background: rgba(244,71,71,0.12);  color: var(--error); }
+  .summary-chip.chip-running { background: var(--accent-muted);   color: var(--accent-text); }
+  .summary-chip.chip-pending { background: var(--bg-input);       color: var(--text-tertiary); }
+  .summary-chip.chip-stopped { background: var(--warning-bg);     color: var(--warning); }
+  .summary-chip strong { font-weight: 700; font-family: var(--font-mono); }
+
+  .summary-spinner {
+    width: 10px; height: 10px;
+    border: 2px solid var(--border-default);
+    border-top-color: var(--accent-text);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  .summary-dot-pending {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-tertiary);
+    display: inline-block;
+  }
+
+  .timeline-percentage {
     font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+    min-width: 40px;
+    text-align: right;
+  }
+  .timeline-percentage.done {
+    color: var(--success);
+  }
+
+  /* ── Timeline Track ─────────────────────────────────── */
+  .timeline-track {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    position: relative;
+  }
+
+  .timeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    padding-top: var(--space-1);
+  }
+
+  /* ── Step Node (clickable button) ──────────────────── */
+  .timeline-step-node {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid var(--border-default);
+    background: var(--bg-root);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .timeline-step-node:hover {
+    border-color: var(--text-secondary);
+    box-shadow: 0 0 0 4px rgba(255,255,255,0.04);
+    transform: scale(1.1);
+  }
+
+  .node-success {
+    background: rgba(52,211,153,0.15);
+    border-color: var(--success);
+    color: var(--success);
+  }
+  .node-failed {
+    background: rgba(244,71,71,0.15);
+    border-color: var(--error);
+    color: var(--error);
+  }
+  .node-running {
+    background: var(--accent-muted);
+    border-color: var(--accent-text);
+    color: var(--accent-text);
+    animation: pulse-node-running 2s ease-in-out infinite;
+  }
+  @keyframes pulse-node-running {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(79,193,255,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(79,193,255,0); }
+  }
+  .node-stopped {
+    background: var(--warning-bg);
+    border-color: var(--warning);
+    color: var(--warning);
+  }
+  .node-pending {
+    background: var(--bg-root);
+    border-color: var(--border-default);
+    color: var(--text-tertiary);
+  }
+
+  .node-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border-default);
+    border-top-color: var(--accent-text);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  .node-empty-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border-default);
+  }
+
+  /* ── Connector Lines between Nodes ──────────────────── */
+  .timeline-connector {
+    position: absolute;
+    top: 18px;
+    left: calc(50% + 18px);
+    width: calc(100% - 36px);
+    height: 2px;
+    background: var(--bg-input);
+    z-index: 0;
+  }
+  .timeline-connector.conn-done {
+    background: var(--success);
+  }
+  .timeline-connector.conn-running {
+    background: linear-gradient(90deg, var(--accent-text) 40%, var(--bg-input) 60%);
+    background-size: 200% 100%;
+    animation: connector-shimmer 1.5s ease-in-out infinite;
+  }
+  @keyframes connector-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: 0 0; }
+  }
+
+  /* ── Step Labels ─────────────────────────────────────── */
+  .timeline-step-label-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    margin-top: var(--space-2);
+    max-width: 100%;
+    text-align: center;
+  }
+
+  .timeline-step-num {
+    font-size: 9px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+  }
+
+  .timeline-step-name {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 90px;
   }
 
   /* ── Two-Column Detail Panels ───────────────────────────── */

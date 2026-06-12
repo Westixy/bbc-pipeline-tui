@@ -22,12 +22,12 @@ var webappDist embed.FS
 // Server holds the HTTP server state.
 type Server struct {
 	cfg    *config.Config
-	client *bitbucket.CachedClient
+	client *bitbucket.Client
 	mux    *http.ServeMux
 }
 
 // New creates a new HTTP server wrapping the Bitbucket client.
-func New(cfg *config.Config, client *bitbucket.CachedClient) *Server {
+func New(cfg *config.Config, client *bitbucket.Client) *Server {
 	s := &Server{
 		cfg:    cfg,
 		client: client,

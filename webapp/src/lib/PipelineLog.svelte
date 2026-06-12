@@ -3,6 +3,7 @@
   import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
   import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
   import { getStepLog, getPipeline } from '../stores/api.js';
+  import { resolveStepStatus } from './utils.js';
 
   let logState = $state('idle');
   let logError = $state('');
@@ -172,14 +173,76 @@
 
   function handleRefresh() { if ($logStepUUID) { const idx = $selectedSteps.findIndex(s => s.uuid === $logStepUUID); if (idx >= 0) loadLog(idx); } }
 
+  // ── Auto-refresh: refresh step log + pipeline/step status to auto-advance ──
+  let refreshingPipelineState = $state(false);
+
+  async function refreshPipelineAndSteps(stepIndex) {
+    if (!$activeProject || !$selectedPipeline?.uuid) return;
+    // Don't overlap refreshes
+    if (refreshingPipelineState) return;
+    refreshingPipelineState = true;
+    try {
+      const data = await getPipeline($activeProject.id, $selectedPipeline.uuid);
+      const freshSteps = data.steps || data.values || [];
+      if (freshSteps.length > 0) {
+        selectedSteps.set(freshSteps);
+        const pipelineData = data.pipeline || data;
+        if (pipelineData) selectedPipeline.set(pipelineData);
+      }
+    } catch (_) {
+      // silently ignore
+    } finally {
+      refreshingPipelineState = false;
+    }
+  }
+
+  function findNextRunningStep(fromIndex) {
+    const steps = $selectedSteps;
+    // Look from the next step onward
+    for (let i = fromIndex + 1; i < steps.length; i++) {
+      const name = steps[i].state?.name;
+      if (name === 'IN_PROGRESS' || name === 'PENDING' || name === 'NOT_STARTED') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   function startAutoRefresh(stepIndex) {
     stopAutoRefresh();
     const step = $selectedSteps[stepIndex];
     if (!step) return;
-    if (step.state?.name === 'IN_PROGRESS' || step.state?.name === 'PENDING') {
+    const sname = step.state?.name;
+    if (sname === 'IN_PROGRESS' || sname === 'PENDING') {
       elapsedInterval = setInterval(updateElapsed, 1000);
-      autoRefreshInterval = setInterval(() => {
+      autoRefreshInterval = setInterval(async () => {
         if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) { stopAutoRefresh(); return; }
+
+        // 1. Refresh pipeline/step status to detect completions
+        await refreshPipelineAndSteps(stepIndex);
+
+        // 2. Check if the current step has completed
+        const steps = $selectedSteps;
+        const current = steps[stepIndex];
+        const currentName = current?.state?.name;
+        const isDone = currentName !== 'IN_PROGRESS' && currentName !== 'PENDING';
+
+        if (isDone) {
+          // Current step finished — find the next running step
+          const nextIdx = findNextRunningStep(stepIndex);
+          if (nextIdx >= 0) {
+            // Navigate to next running step
+            await loadLog(nextIdx);
+            startAutoRefresh(nextIdx);
+            navigateTo('logs', $selectedPipeline?.uuid, nextIdx);
+          } else {
+            // No more running steps — stop refreshing
+            stopAutoRefresh();
+          }
+          return;
+        }
+
+        // 3. Refresh the log content silently
         if (logState !== 'loading') loadLog(stepIndex, { silent: true });
       }, 5000);
     }
@@ -258,20 +321,20 @@
   }
 
   function stepDotClass(state) {
-    const name = state?.name;
-    if (name === 'SUCCESSFUL') return 'dot-success';
-    if (name === 'FAILED' || name === 'ERROR') return 'dot-error';
-    if (name === 'IN_PROGRESS') return 'dot-running';
-    if (name === 'STOPPED' || name === 'PAUSED' || name === 'EXPIRED') return 'dot-stopped';
+    const status = resolveStepStatus(state);
+    if (status === 'SUCCESSFUL') return 'dot-success';
+    if (status === 'FAILED') return 'dot-error';
+    if (status === 'IN_PROGRESS') return 'dot-running';
+    if (status === 'STOPPED') return 'dot-stopped';
     return 'dot-pending';
   }
 
   function stepStatusBadgeClass(state) {
-    const name = state?.name || '';
-    if (name === 'SUCCESSFUL') return 'badge-success';
-    if (name === 'FAILED' || name === 'ERROR') return 'badge-error';
-    if (name === 'IN_PROGRESS') return 'badge-info';
-    if (name === 'STOPPED' || name === 'PAUSED' || name === 'EXPIRED') return 'badge-warning';
+    const status = resolveStepStatus(state);
+    if (status === 'SUCCESSFUL') return 'badge-success';
+    if (status === 'FAILED') return 'badge-error';
+    if (status === 'IN_PROGRESS') return 'badge-info';
+    if (status === 'STOPPED') return 'badge-warning';
     return 'badge-neutral';
   }
 
@@ -296,7 +359,7 @@
     return $selectedSteps[currentStepIndex];
   });
 
-  let isRunning = $derived(currentStep?.state?.name === 'IN_PROGRESS' || currentStep?.state?.name === 'PENDING');
+  let isRunning = $derived(resolveStepStatus(currentStep?.state) === 'IN_PROGRESS' || resolveStepStatus(currentStep?.state) === 'PENDING');
   let hasPrev = $derived(currentStepIndex > 0);
   let hasNext = $derived(currentStepIndex >= 0 && currentStepIndex < $selectedSteps.length - 1);
 
@@ -408,6 +471,26 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Step Progress Bar ──────────────────────────────────── -->
+  <div class="step-progress-bar">
+    {#each $selectedSteps as step, i}
+      <button
+        class="step-progress-item"
+        class:active={i === currentStepIndex}
+        class:done={resolveStepStatus(step.state) === 'SUCCESSFUL'}
+        class:failed={resolveStepStatus(step.state) === 'FAILED'}
+        onclick={() => navigateStep(i)}
+        title="{step.name || `Step ${i + 1}`} — {statusLabel(step.state)}"
+      >
+        <span class="step-progress-dot"></span>
+        <span class="step-progress-label">{step.name || `Step ${i + 1}`}</span>
+      </button>
+      {#if i < $selectedSteps.length - 1}
+        <span class="step-progress-connector" class:done={resolveStepStatus(step.state) === 'SUCCESSFUL'}></span>
+      {/if}
+    {/each}
   </div>
 
   <!-- Persistent Search Bar ──────────────────────────────── -->
@@ -681,6 +764,99 @@
     text-transform: uppercase;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  /* ── Step Progress Bar ──────────────────────────────────── */
+  .step-progress-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0 var(--space-5);
+    height: 36px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-subtle);
+    overflow-x: auto;
+    flex-shrink: 0;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .step-progress-bar::-webkit-scrollbar { display: none; }
+
+  .step-progress-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-2);
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+  }
+  .step-progress-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+  .step-progress-item.active {
+    color: var(--text-primary);
+    background: var(--accent-muted);
+    font-weight: 700;
+  }
+  .step-progress-item.done {
+    color: var(--success);
+  }
+  .step-progress-item.failed {
+    color: var(--error);
+  }
+
+  .step-progress-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-emphasis);
+    background: transparent;
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+  }
+  .step-progress-item.done .step-progress-dot {
+    background: var(--success);
+    border-color: var(--success);
+  }
+  .step-progress-item.failed .step-progress-dot {
+    background: var(--error);
+    border-color: var(--error);
+  }
+  .step-progress-item.active .step-progress-dot {
+    background: var(--accent-text);
+    border-color: var(--accent-text);
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  .step-progress-label {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .step-progress-item.active .step-progress-label {
+    max-width: 140px;
+  }
+
+  .step-progress-connector {
+    width: 16px;
+    height: 1px;
+    background: var(--border-emphasis);
+    flex-shrink: 0;
+    transition: background var(--transition-fast);
+  }
+  .step-progress-connector.done {
+    background: var(--success);
   }
 
   /* ── Search Bar ─────────────────────────────────────────── */

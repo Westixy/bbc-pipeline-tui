@@ -6,9 +6,10 @@
   let switching = $state(false);
 
   function selectProject(index) {
-    if (index === $activeProjectId) return;
     switching = true;
-    activeProjectId.set(index);
+    if (index !== $activeProjectId) {
+      activeProjectId.set(index);
+    }
     navigateTo('list');
   }
 </script>

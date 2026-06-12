@@ -43,13 +43,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create client with cache
+	// Create client
 	client := bitbucket.NewClient(cfg.Username, cfg.AppPass)
-	cachedClient := bitbucket.NewCachedClient(client)
 
 	// --- WebApp mode ---
 	if *webappAddr != "" {
-		srv := server.New(cfg, cachedClient)
+		srv := server.New(cfg, client)
 
 		fmt.Printf("Starting webapp on http://%s\n", *webappAddr)
 		if err := http.ListenAndServe(*webappAddr, srv.Handler()); err != nil {
@@ -63,6 +62,7 @@ func main() {
 	fmt.Println("Starting TUI...")
 
 	// Create and run model
+	cachedClient := bitbucket.NewCachedClient(client)
 	model := ui.NewModel(cfg, cachedClient)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
