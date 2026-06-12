@@ -73,7 +73,7 @@
     selectedSteps.set([]);
     selectedVariables.set([]);
     detailState.set('loading');
-    navigateTo('detail');
+    navigateTo('detail', pipeline.uuid);
   }
 
   let lastLoaded = ''; // plain variable, NOT reactive — prevents re-entrant loops

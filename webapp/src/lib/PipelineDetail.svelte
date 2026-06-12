@@ -1,6 +1,6 @@
 <script>
   import { get } from 'svelte/store';
-  import { activeProjectId, activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logPipeUUID, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
+  import { activeProjectId, activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
   import { getPipeline, listSteps, listVariables, getLogVariables, listRepositories, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState } from './utils.js';
@@ -172,10 +172,9 @@
                   class="btn btn-small"
                   onclick={() => {
                     // Save pipeline UUID and step info for the log view
-                    logPipeUUID.set($selectedPipeline.uuid);
                     logStepName.set(step.name || 'Unnamed step');
                     logStepUUID.set(step.uuid);
-                    navigateTo('logs');
+                    navigateTo('logs', $selectedPipeline.uuid, step.uuid);
                   }}
                 >
                   📜 View Log

@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logPipeUUID, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
+  import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
   import { navigateTo } from '../stores/router.js';
   import { getStepLog } from '../stores/api.js';
 
@@ -20,7 +20,6 @@
       const data = await getStepLog($activeProject.id, $selectedPipeline.uuid, step.uuid);
       logContent.set(data.log || 'No log content available');
       logStepName.set(step.name || `Step ${stepIndex + 1}`);
-      logPipeUUID.set($selectedPipeline.uuid);
       logStepUUID.set(step.uuid);
       currentStepIndex = stepIndex;
       logState = 'ready';
@@ -77,7 +76,7 @@
 
 <div class="pipeline-log">
   <div class="log-header">
-    <button class="btn btn-secondary" onclick={() => navigateTo('detail')}>
+    <button class="btn btn-secondary" onclick={() => navigateTo('detail', $selectedPipeline?.uuid)}>
       ← Back to detail
     </button>
     <div class="log-title">
@@ -98,7 +97,11 @@
         <button
           class="step-tab"
           class:active={$logStepUUID === step.uuid}
-          onclick={() => { loadLog(i); startAutoRefresh(i); }}
+          onclick={() => {
+            loadLog(i);
+            startAutoRefresh(i);
+            navigateTo('logs', $selectedPipeline?.uuid, step.uuid);
+          }}
         >
           <span class="tab-icon">
             {#if step.state?.name === 'COMPLETED'}
