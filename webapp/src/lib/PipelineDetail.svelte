@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { activeProjectId, activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
@@ -7,10 +8,38 @@
 
   let stopping = $state(false);
   let running = $state(false);
+  let autoRefreshRunning = $state(false);
+  let autoRefreshInterval = null;
+  let lastRefreshed = $state(null);
 
-  async function loadDetail() {
+  function startAutoRefresh() {
+    if (autoRefreshInterval) return;
+    autoRefreshRunning = true;
+    autoRefreshInterval = setInterval(() => {
+      const pipe = $selectedPipeline;
+      if (pipe?.state?.name === 'IN_PROGRESS' || pipe?.state?.name === 'PENDING' || pipe?.state?.name === 'IN_PROGRESS_STOPPING') {
+        loadDetail(true);
+      } else {
+        stopAutoRefresh();
+      }
+    }, 5000);
+  }
+
+  function stopAutoRefresh() {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+      autoRefreshInterval = null;
+    }
+    autoRefreshRunning = false;
+  }
+
+  onDestroy(() => {
+    stopAutoRefresh();
+  });
+
+  async function loadDetail(silent = false) {
     if (!$activeProject || !$selectedPipeline?.uuid) return;
-    detailState.set('loading');
+    if (!silent) detailState.set('loading');
     try {
       const [pipeResp, varsResp, logVarsResp] = await Promise.all([
         getPipeline($activeProject.id, $selectedPipeline.uuid),
@@ -18,7 +47,6 @@
         getLogVariables($activeProject.id, $selectedPipeline.uuid).catch(() => ({ variables: [] })),
       ]);
 
-      // getPipeline returns { pipeline: {...}, steps: [...] }
       const pipelineData = pipeResp.pipeline || pipeResp;
       const stepsData = pipeResp.steps || [];
       const varsData = varsResp.variables || [];
@@ -29,9 +57,18 @@
       selectedVariables.set(varsData);
       selectedLogVariables.set(logVarsData);
       detailState.set('ready');
+      lastRefreshed = new Date();
+
+      if (pipelineData?.state?.name === 'IN_PROGRESS' || pipelineData?.state?.name === 'PENDING' || pipelineData?.state?.name === 'IN_PROGRESS_STOPPING') {
+        startAutoRefresh();
+      } else {
+        stopAutoRefresh();
+      }
     } catch (e) {
-      showError(e.message);
-      detailState.set('error');
+      if (!silent) {
+        showError(e.message);
+        detailState.set('error');
+      }
     }
   }
 
@@ -65,7 +102,7 @@
     }
   }
 
-  let detailLoadedFor = null; // plain variable — prevents effect re-entrance
+  let detailLoadedFor = null;
 
   $effect(() => {
     if ($page !== 'detail' || !$activeProject || !$selectedPipeline?.uuid) return;
@@ -145,18 +182,28 @@
           <span class="commit-hash">{$selectedPipeline?.target?.commit?.hash ? $selectedPipeline.target.commit.hash.substring(0, 8) : '—'}</span>
         </div>
       </div>
+      {#if autoRefreshRunning}
+        <div class="auto-refresh-bar">
+          <span class="refresh-dot"></span>
+          Auto-refreshing every 5s — last updated {lastRefreshed?.toLocaleTimeString() || 'now'}
+        </div>
+      {/if}
     </div>
 
     <!-- Steps -->
     <div class="steps-section">
-      <h3>Steps ({$selectedSteps.length})</h3>
+      <div class="steps-section-header">
+        <h3>Steps ({$selectedSteps.length})</h3>
+        <span class="step-hint">Click "View Log" on any step to see its output</span>
+      </div>
       {#if $selectedSteps.length === 0}
         <p class="empty-text">No steps found</p>
       {:else}
         <div class="steps-list">
-          {#each $selectedSteps as step}
-            <div class="step-item">
+          {#each $selectedSteps as step, i}
+            <div class="step-item" class:step-running={step.state?.name === 'IN_PROGRESS'}>
               <div class="step-header">
+                <span class="step-number">Step {i + 1}</span>
                 <span class="step-name">{step.name || 'Unnamed step'}</span>
                 <span class="status-badge step-status {statusClassForState(step.state)}">
                   {statusLabel(step.state)}
@@ -169,12 +216,11 @@
               </div>
               {#if step.state?.name !== 'NOT_STARTED'}
                 <button
-                  class="btn btn-small"
+                  class="btn btn-small btn-log"
                   onclick={() => {
-                    // Save pipeline UUID and step info for the log view
                     logStepName.set(step.name || 'Unnamed step');
                     logStepUUID.set(step.uuid);
-                    navigateTo('logs', $selectedPipeline.uuid, step.uuid);
+                    navigateTo('logs', $selectedPipeline.uuid, i);
                   }}
                 >
                   📜 View Log
@@ -254,23 +300,23 @@
     color: #e7e9ea;
   }
 
-  .btn-secondary:hover {
-    background: #3e4144;
+  .btn-secondary:hover { background: #3e4144; }
+
+  .btn-primary {
+    background: #1d9bf0;
+    color: #fff;
   }
+
+  .btn-primary:hover { background: #1a8cd8; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-danger {
     background: #b91c1c;
     color: #fff;
   }
 
-  .btn-danger:hover {
-    background: #991b1b;
-  }
-
-  .btn-danger:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  .btn-danger:hover { background: #991b1b; }
+  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-small {
     padding: 0.25rem 0.75rem;
@@ -282,9 +328,7 @@
     cursor: pointer;
   }
 
-  .btn-small:hover {
-    background: #3e4144;
-  }
+  .btn-small:hover { background: #3e4144; }
 
   .loading-state, .error-state {
     text-align: center;
@@ -305,9 +349,7 @@
     margin: 0 auto 0.5rem;
   }
 
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .info-card, .steps-section, .variables-section {
     background: #16181c;
@@ -320,6 +362,22 @@
     font-size: 1rem;
     margin-bottom: 1rem;
     color: #e7e9ea;
+  }
+
+  .steps-section-header {
+    display: flex;
+    align-items: baseline;
+    margin-bottom: 1rem;
+  }
+
+  .steps-section-header h3 {
+    margin-bottom: 0;
+  }
+
+  .step-hint {
+    font-size: 0.72rem;
+    color: #484f58;
+    margin-left: 0.5rem;
   }
 
   .info-grid {
@@ -406,18 +464,32 @@
     gap: 0.5rem;
   }
 
+  .step-running {
+    border-color: #1d9bf0;
+    background: #161f2c;
+  }
+
   .step-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 0.75rem;
+  }
+
+  .step-number {
+    font-size: 0.75rem;
+    color: #484f58;
+    font-weight: 600;
+    min-width: 48px;
   }
 
   .step-name {
     font-weight: 500;
+    flex: 1;
   }
 
   .step-status {
     font-size: 0.7rem;
+    margin-left: auto;
   }
 
   .step-meta {
@@ -425,5 +497,34 @@
     gap: 1rem;
     font-size: 0.8rem;
     color: #8b949e;
+  }
+
+  .btn-log {
+    align-self: flex-start;
+  }
+
+  .auto-refresh-bar {
+    margin-top: 0.75rem;
+    padding: 0.4rem 0.75rem;
+    background: #161f2c;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: #6cb6ff;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .refresh-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #1d9bf0;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
   }
 </style>

@@ -1,6 +1,6 @@
 <script>
   import { projects, activeProjectId, activeProject, notification } from './stores/appState.js';
-  import { page, initRoute, navigateTo, projectIndexFromUrl } from './stores/router.js';
+  import { page, initRoute, navigateTo, workspaceFromUrl, repoSlugFromUrl } from './stores/router.js';
   import { listProjects } from './stores/api.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
@@ -14,6 +14,11 @@
   let loadError = $state(null);
   let dataLoaded = false;
 
+  /** Find project index by workspace and repoSlug. Returns -1 if not found. */
+  function findProjectIndex(workspace, repoSlug) {
+    return $projects.findIndex(p => p.workspace === workspace && p.repo_slug === repoSlug);
+  }
+
   async function loadData() {
     loading = true;
     loadError = null;
@@ -21,13 +26,21 @@
       const data = await listProjects();
       projects.set(data.projects || []);
       const count = (data.projects || []).length;
-      // If a valid project index is in the URL, restore it; otherwise default to 0
-      if (count > 0 && $projectIndexFromUrl !== null && $projectIndexFromUrl < count) {
-        activeProjectId.set($projectIndexFromUrl);
-      } else if (count > 0) {
-        activeProjectId.set(0);
+
+      if (count > 0) {
+        // Restore active project from workspace/repoSlug in URL, otherwise default to 0
+        const ws = $workspaceFromUrl;
+        const rs = $repoSlugFromUrl;
+        let idx = -1;
+        if (ws && rs) {
+          idx = findProjectIndex(ws, rs);
+        }
+        if (idx < 0) idx = 0;
+        activeProjectId.set(idx);
+        initRoute(count > 0);
+      } else {
+        initRoute(false);
       }
-      initRoute(count > 0);
     } catch (e) {
       console.error('Failed to load projects:', e);
       loadError = e.message || 'Failed to load projects';
@@ -36,22 +49,38 @@
     }
   }
 
-  // Keep activeProjectId in the URL for project-dependent pages
+  // Keep the URL hash in sync with the current project and page.
+  // Only syncs for pages that involve a project (not 'manage').
   $effect(() => {
-    void $page;
-    void $activeProjectId;
-    if ($page && $page !== 'manage') {
-      const expectedHash = `#/${$page}/${$activeProjectId}`;
-      if (window.location.hash !== expectedHash) {
-        window.location.hash = expectedHash;
-      }
+    const pg = $page;
+    if (!pg || pg === 'manage') return;
+    const proj = $activeProject;
+    if (!proj) return;
+    const ws = encodeURIComponent(proj.workspace);
+    const rs = encodeURIComponent(proj.repo_slug);
+
+    let expected;
+    if (pg === 'list') {
+      expected = `#/bbc/${ws}/${rs}`;
+    } else if (pg === 'trigger') {
+      expected = `#/bbc/${ws}/${rs}/trigger`;
+    } else {
+      // For detail/logs pages, keep the rest of the hash intact
+      return;
+    }
+
+    if (window.location.hash !== expected) {
+      window.location.hash = expected;
     }
   });
 
-  // Restore activeProjectId from URL when navigating
+  // Restore activeProjectId from URL workspace/repoSlug when navigating
   $effect(() => {
-    const idx = $projectIndexFromUrl;
-    if (idx !== null && idx >= 0 && idx !== $activeProjectId && idx < $projects.length) {
+    const ws = $workspaceFromUrl;
+    const rs = $repoSlugFromUrl;
+    if (!ws || !rs) return;
+    const idx = findProjectIndex(ws, rs);
+    if (idx >= 0 && idx !== $activeProjectId && idx < $projects.length) {
       activeProjectId.set(idx);
     }
   });
@@ -93,14 +122,18 @@
           <ManageProjects />
         {/if}
       {:else}
-        <div class="empty-state">
-          <div class="empty-icon">🚀</div>
-          <h2>No Projects Configured</h2>
-          <p>Go to Manage Projects to add your first Bitbucket repository.</p>
-          <button class="btn btn-primary" onclick={() => navigateTo('manage')}>
-            Manage Projects
-          </button>
-        </div>
+        {#if $page === 'manage'}
+          <ManageProjects />
+        {:else}
+          <div class="empty-state">
+            <div class="empty-icon">🚀</div>
+            <h2>No Projects Configured</h2>
+            <p>Go to Manage Projects to add your first Bitbucket repository.</p>
+            <button class="btn btn-primary" onclick={() => navigateTo('manage')}>
+              Manage Projects
+            </button>
+          </div>
+        {/if}
       {/if}
     </main>
   </div>

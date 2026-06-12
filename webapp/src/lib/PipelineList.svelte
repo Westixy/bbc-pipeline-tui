@@ -68,6 +68,11 @@
     }, 400);
   }
 
+  function clearFilter() {
+    localFilter = '';
+    listFilter.set('');
+  }
+
   function viewDetail(pipeline) {
     selectedPipeline.set(pipeline);
     selectedSteps.set([]);
@@ -96,13 +101,18 @@
       <span class="pipeline-count">{$pipelines.length} pipelines</span>
     </div>
     <div class="header-right">
-      <input
-        type="text"
-        class="filter-input"
-        placeholder="Filter pipelines..."
-        bind:value={localFilter}
-        oninput={handleFilterInput}
-      />
+      <div class="filter-wrapper">
+        <input
+          type="text"
+          class="filter-input"
+          placeholder="Filter pipelines..."
+          bind:value={localFilter}
+          oninput={handleFilterInput}
+        />
+        {#if localFilter}
+          <button class="clear-filter-btn" onclick={clearFilter} title="Clear filter">&times;</button>
+        {/if}
+      </div>
       <select class="sort-select" bind:value={$listSort}>
         <option value="-created_on">Newest first</option>
         <option value="+created_on">Oldest first</option>
@@ -112,8 +122,19 @@
 
   {#if $listState === 'loading' && $pipelines.length === 0}
     <div class="loading-state">
-      <div class="spinner"></div>
-      <p>Loading pipelines...</p>
+      <div class="skeleton-table">
+        {#each Array(5) as _}
+          <div class="skeleton-row">
+            <div class="skeleton-cell skeleton-num"></div>
+            <div class="skeleton-cell skeleton-target"></div>
+            <div class="skeleton-cell skeleton-status"></div>
+            <div class="skeleton-cell skeleton-dur"></div>
+            <div class="skeleton-cell skeleton-creator"></div>
+            <div class="skeleton-cell skeleton-date"></div>
+            <div class="skeleton-cell skeleton-btn"></div>
+          </div>
+        {/each}
+      </div>
     </div>
   {:else if $listState === 'error'}
     <div class="error-state">
@@ -235,11 +256,17 @@
     align-items: center;
   }
 
+  .filter-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
   .filter-input {
     background: #16181c;
     border: 1px solid #2f3336;
     border-radius: 9999px;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 2rem 0.5rem 1rem;
     color: #e7e9ea;
     font-size: 0.9rem;
     width: 200px;
@@ -252,6 +279,26 @@
 
   .filter-input::placeholder {
     color: #71767b;
+  }
+
+  .clear-filter-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 4px;
+  }
+
+  .clear-filter-btn:hover {
+    color: #e7e9ea;
+    background: #2f3336;
   }
 
   .sort-select {
@@ -507,5 +554,42 @@
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     display: inline-block;
+  }
+
+  /* Skeleton loader */
+  .skeleton-table {
+    padding: 0.5rem;
+  }
+
+  .skeleton-row {
+    display: flex;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #1f2228;
+  }
+
+  .skeleton-row:last-child {
+    border-bottom: none;
+  }
+
+  .skeleton-cell {
+    height: 16px;
+    background: linear-gradient(90deg, #2f3336 25%, #3e4144 50%, #2f3336 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: 4px;
+  }
+
+  .skeleton-num { width: 40px; }
+  .skeleton-target { width: 80px; }
+  .skeleton-status { width: 70px; }
+  .skeleton-dur { width: 60px; }
+  .skeleton-creator { width: 90px; }
+  .skeleton-date { width: 90px; }
+  .skeleton-btn { width: 50px; }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
   }
 </style>

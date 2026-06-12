@@ -1,126 +1,176 @@
 <script>
-  import { activeProject, triggerPreTarget, triggerPreSelector, triggerPreVars, triggerState, triggerError, showSuccess, showError } from '../stores/appState.js';
+  import { get } from 'svelte/store';
+  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, triggerPreTarget, triggerPreSelector, triggerPreVars, showError, showSuccess } from '../stores/appState.js';
   import { navigateTo } from '../stores/router.js';
   import { triggerPipeline } from '../stores/api.js';
 
-  let target = $state('');
-  let selector = $state(null);
+  let targetBranch = $state('');
+  let pipelineSelector = $state('');
   let variables = $state([]);
-  let initialized = false;
+  let running = $state(false);
+  let showPreFilled = $state(false);
 
-  $effect(() => {
-    if (initialized) return;
-    initialized = true;
-    target = $triggerPreTarget || '';
-    selector = $triggerPreSelector || null;
-    const preVars = $triggerPreVars || [];
-    variables = preVars.length > 0
-      ? preVars.map(v => ({ key: v.key, value: v.value }))
-      : [{ key: '', value: '' }];
-  });
+  // Check whether we have pre-filled data from a previous pipeline detail
+  let isRunAgain = $derived(
+    Boolean($triggerPreTarget) || ($triggerPreVars && $triggerPreVars.length > 0)
+  );
 
-  function addVar() {
+  function usePreFilled() {
+    targetBranch = $triggerPreTarget || '';
+    pipelineSelector = typeof $triggerPreSelector === 'object'
+      ? ($triggerPreSelector?.pattern || '')
+      : ($triggerPreSelector || '');
+    variables = ($triggerPreVars || []).map(v => ({ key: v.key, value: v.value }));
+    showPreFilled = true;
+  }
+
+  function addVariableRow() {
     variables = [...variables, { key: '', value: '' }];
   }
 
-  function removeVar(index) {
+  function updateVariableKey(index, value) {
+    variables = variables.map((v, i) => i === index ? { ...v, key: value } : v);
+  }
+
+  function updateVariableValue(index, value) {
+    variables = variables.map((v, i) => i === index ? { ...v, value: value } : v);
+  }
+
+  function removeVariable(index) {
     variables = variables.filter((_, i) => i !== index);
   }
 
-  async function handleTrigger() {
+  async function handleRun(e) {
+    e.preventDefault();
     if (!$activeProject) return;
-    if (!target.trim()) {
-      triggerError.set('Target branch is required');
+    if (!targetBranch.trim()) {
+      showError('Target branch is required');
       return;
     }
-    triggerState.set('submitting');
-    triggerError.set('');
+    running = true;
     try {
-      const cleanVars = variables
-        .filter(v => v.key.trim() !== '')
+      const cleanedVars = variables
+        .filter(v => v.key.trim())
         .map(v => ({ key: v.key.trim(), value: v.value }));
-      await triggerPipeline($activeProject.id, target.trim(), cleanVars, selector);
-      showSuccess(`Pipeline triggered on "${target.trim()}"`);
+      const selector = pipelineSelector.trim()
+        ? { type: 'custom', pattern: pipelineSelector.trim() }
+        : null;
+      const result = await triggerPipeline(
+        $activeProject.id,
+        targetBranch.trim(),
+        cleanedVars,
+        selector
+      );
+      showSuccess(`Pipeline #${result.build_number || 'new'} started`);
       navigateTo('list');
     } catch (e) {
-      triggerError.set(e.message || 'Trigger failed');
+      showError(e.message);
     } finally {
-      triggerState.set('idle');
+      running = false;
     }
   }
+
+  $effect(() => {
+    if (isRunAgain && !showPreFilled && !targetBranch) {
+      usePreFilled();
+    }
+  });
 </script>
 
-<div class="trigger-view">
+<div class="trigger-pipeline">
   <div class="trigger-header">
     <button class="btn btn-secondary" onclick={() => navigateTo('list')}>
       ← Back to list
     </button>
-    <h2>▶ Run Pipeline</h2>
+    <h2>Trigger Pipeline</h2>
+    {#if isRunAgain}
+      <span class="run-again-badge">🔁 Run again — pre-filled from previous pipeline</span>
+    {/if}
   </div>
 
-  <form class="trigger-form" onsubmit={(e) => { e.preventDefault(); handleTrigger(); }}>
-    <div class="form-section">
-      <label class="form-label" for="target-input">Target Branch</label>
-      <input
-        id="target-input"
-        type="text"
-        class="form-input"
-        bind:value={target}
-        placeholder="e.g. main"
-      />
-    </div>
+  <form class="trigger-form" onsubmit={handleRun}>
+    <div class="trigger-card">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="trigger-target">Target Branch *</label>
+          <input
+            id="trigger-target"
+            type="text"
+            class="form-input"
+            placeholder="e.g. main, develop, feature/xyz"
+            bind:value={targetBranch}
+            required
+          />
+          <span class="form-hint">The git branch to run the pipeline against</span>
+        </div>
 
-    {#if selector}
-      <div class="form-section">
-        <label class="form-label">Pipeline Definition</label>
-        <div class="selector-display">
-          <span class="selector-badge">{selector.type}:{selector.pattern}</span>
+        <div class="form-group">
+          <label class="form-label" for="trigger-selector">Pipeline Selector (optional)</label>
+          <input
+            id="trigger-selector"
+            type="text"
+            class="form-input"
+            placeholder="e.g. default, custom-pattern"
+            bind:value={pipelineSelector}
+          />
+          <span class="form-hint">Filter which pipeline steps to execute</span>
         </div>
       </div>
-    {/if}
 
-    <div class="form-section">
-      <div class="vars-header">
-        <label class="form-label">Variables</label>
-        <button type="button" class="btn btn-small" onclick={addVar}>+ Add</button>
-      </div>
-      {#if variables.length === 0}
-        <p class="empty-text">No variables</p>
-      {:else}
-        <div class="vars-list">
-          {#each variables as v, i}
-            <div class="var-row">
-              <input
-                type="text"
-                class="form-input var-key"
-                placeholder="KEY"
-                bind:value={v.key}
-              />
-              <input
-                type="text"
-                class="form-input var-value"
-                placeholder="value"
-                bind:value={v.value}
-              />
-              <button type="button" class="btn btn-icon btn-danger" onclick={() => removeVar(i)} title="Remove">✕</button>
-            </div>
-          {/each}
+      <div class="variables-section">
+        <div class="variables-header">
+          <h3>Variables</h3>
+          <button type="button" class="btn btn-small" onclick={addVariableRow}>
+            + Add Variable
+          </button>
         </div>
-      {/if}
+        {#if variables.length === 0}
+          <p class="empty-text">No custom variables. Click "+ Add Variable" to add one.</p>
+        {:else}
+          <div class="variables-list">
+            {#each variables as v, i}
+              <div class="variable-row">
+                <input
+                  type="text"
+                  class="form-input var-key"
+                  placeholder="Key"
+                  aria-label="Variable key"
+                  value={v.key}
+                  oninput={(e) => updateVariableKey(i, e.target.value)}
+                />
+                <input
+                  type="text"
+                  class="form-input var-value"
+                  placeholder="Value"
+                  aria-label="Variable value"
+                  value={v.value}
+                  oninput={(e) => updateVariableValue(i, e.target.value)}
+                />
+                <button
+                  type="button"
+                  class="btn btn-icon btn-remove"
+                  onclick={() => removeVariable(i)}
+                  title="Remove variable"
+                >
+                  ✕
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-run" disabled={running}>
+          {running ? '⏳ Running...' : '▶ Run Pipeline'}
+        </button>
+      </div>
     </div>
-
-    {#if $triggerError}
-      <div class="trigger-error">❌ {$triggerError}</div>
-    {/if}
-
-    <button type="submit" class="btn btn-primary btn-run" disabled={$triggerState === 'submitting'}>
-      {$triggerState === 'submitting' ? '⏳ Running...' : '▶ Run Pipeline'}
-    </button>
   </form>
 </div>
 
 <style>
-  .trigger-view {
+  .trigger-pipeline {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -130,6 +180,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
+    flex-wrap: wrap;
   }
 
   .trigger-header h2 {
@@ -137,113 +188,13 @@
     font-weight: 600;
   }
 
-  .trigger-form {
-    background: #16181c;
-    border: 1px solid #2f3336;
-    border-radius: 12px;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    max-width: 600px;
-  }
-
-  .form-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .form-label {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #e7e9ea;
-  }
-
-  .form-input {
-    background: #0f1419;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-    padding: 0.6rem 0.75rem;
-    color: #e7e9ea;
-    font-size: 0.9rem;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-
-  .form-input:focus {
-    border-color: #1d9bf0;
-  }
-
-  .form-input::placeholder {
-    color: #71767b;
-  }
-
-  .vars-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .vars-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .var-row {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .var-key {
-    flex: 1;
-  }
-
-  .var-value {
-    flex: 2;
-  }
-
-  .btn-icon {
-    background: none;
-    border: none;
-    color: #f85149;
-    cursor: pointer;
-    font-size: 1rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 6px;
-    transition: background 0.15s;
-  }
-
-  .btn-icon:hover {
-    background: #3e1a1a;
-  }
-
-  .trigger-error {
-    background: #3e1a1a;
-    color: #f85149;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    border: 1px solid #5c2424;
-  }
-
-  .btn-run {
-    align-self: flex-start;
-    padding: 0.625rem 2rem;
-  }
-
-  .btn-run:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .empty-text {
-    color: #71767b;
-    font-style: italic;
-    font-size: 0.85rem;
+  .run-again-badge {
+    background: #1d2e3e;
+    color: #6cb6ff;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 500;
   }
 
   .btn {
@@ -262,27 +213,143 @@
     color: #e7e9ea;
   }
 
-  .btn-secondary:hover {
-    background: #3e4144;
-  }
+  .btn-secondary:hover { background: #3e4144; }
 
   .btn-primary {
     background: #1d9bf0;
     color: #fff;
   }
 
-  .btn-primary:hover {
-    background: #1a8cd8;
-  }
+  .btn-primary:hover { background: #1a8cd8; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-small {
     padding: 0.25rem 0.75rem;
     font-size: 0.8rem;
     background: #2f3336;
     color: #e7e9ea;
+    border: none;
+    border-radius: 9999px;
+    cursor: pointer;
   }
 
-  .btn-small:hover {
-    background: #3e4144;
+  .btn-small:hover { background: #3e4144; }
+
+  .btn-icon {
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    line-height: 1;
   }
+
+  .btn-icon:hover { background: #2f3336; color: #f85149; }
+
+  .trigger-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .trigger-card {
+    background: #16181c;
+    border: 1px solid #2f3336;
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .form-row {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .form-group {
+    flex: 1;
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .form-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #8b949e;
+  }
+
+  .form-hint {
+    font-size: 0.72rem;
+    color: #484f58;
+  }
+
+  .form-input {
+    background: #0d1117;
+    border: 1px solid #2f3336;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    color: #e7e9ea;
+    font-size: 0.9rem;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .form-input:focus { border-color: #1d9bf0; }
+  .form-input::placeholder { color: #484f58; }
+
+  h3 {
+    font-size: 1rem;
+    color: #e7e9ea;
+    margin: 0;
+  }
+
+  .variables-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .variables-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .empty-text {
+    color: #71767b;
+    font-style: italic;
+  }
+
+  .variables-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .variable-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .var-key { flex: 1; }
+  .var-value { flex: 2; }
+
+  .btn-remove { flex-shrink: 0; }
+
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+    border-top: 1px solid #2f3336;
+    padding-top: 1rem;
+  }
+
+  .btn-run { padding: 0.6rem 2rem; }
 </style>

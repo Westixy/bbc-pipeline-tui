@@ -6,20 +6,106 @@
   let newWorkspace = $state('');
   let newRepoSlug = $state('');
   let adding = $state(false);
-  let removing = $state(null); // id being removed
+  let removing = $state(null);
+  let showSuggestions = $state(false);
+  let highlightedIdx = $state(-1);
+  let searchLoading = $state(false);
+  let debounceTimer = null;
+
+  let suggestions = $derived.by(() => {
+    if (!$workspaceRepos || $workspaceRepos.length === 0) return [];
+    const term = newRepoSlug.trim().toLowerCase();
+    if (!term) {
+      return [...$workspaceRepos].sort((a, b) => {
+        const na = (a.name || '').toLowerCase();
+        const nb = (b.name || '').toLowerCase();
+        if (na !== nb) return na < nb ? -1 : 1;
+        return (a.full_name || '').toLowerCase() < (b.full_name || '').toLowerCase() ? -1 : 1;
+      });
+    }
+    return $workspaceRepos
+      .filter(r =>
+        (r.name && r.name.toLowerCase().includes(term)) ||
+        (r.full_name && r.full_name.toLowerCase().includes(term))
+      )
+      .sort((a, b) => {
+        const na = (a.name || '').toLowerCase();
+        const nb = (b.name || '').toLowerCase();
+        if (na !== nb) return na < nb ? -1 : 1;
+        return (a.full_name || '').toLowerCase() < (b.full_name || '').toLowerCase() ? -1 : 1;
+      });
+  });
+
+  function handleWorkspaceInput() {
+    showSuggestions = false;
+    highlightedIdx = -1;
+    workspaceReposState.set('idle');
+    workspaceRepos.set([]);
+    if (debounceTimer) clearTimeout(debounceTimer);
+    const ws = newWorkspace.trim();
+    if (ws.length < 2) return;
+    debounceTimer = setTimeout(() => {
+      loadRepos(ws);
+    }, 500);
+  }
 
   async function loadRepos(workspace) {
-    if (!workspace.trim()) return;
+    if (!workspace || workspace.length < 2) return;
     workspaceReposState.set('loading');
+    searchLoading = true;
     workspaceReposError.set('');
     try {
-      const data = await listRepositories(workspace.trim());
+      const data = await listRepositories(workspace);
       workspaceRepos.set(data.repositories || []);
       workspaceReposState.set('ready');
+      if ((data.repositories || []).length > 0) {
+        showSuggestions = true;
+      }
     } catch (e) {
       workspaceReposError.set(e.message);
       workspaceReposState.set('error');
+    } finally {
+      searchLoading = false;
     }
+  }
+
+  function handleSuggestionKeydown(e) {
+    if (!showSuggestions || suggestions.length === 0) {
+      if (e.key === 'ArrowDown' && $workspaceRepos.length > 0) {
+        showSuggestions = true;
+        highlightedIdx = 0;
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      highlightedIdx = (highlightedIdx + 1) % suggestions.length;
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlightedIdx = (highlightedIdx - 1 + suggestions.length) % suggestions.length;
+    } else if (e.key === 'Enter' && highlightedIdx >= 0) {
+      e.preventDefault();
+      selectRepoSlug(suggestions[highlightedIdx]);
+    } else if (e.key === 'Escape') {
+      showSuggestions = false;
+      highlightedIdx = -1;
+    }
+  }
+
+  function selectRepoSlug(repo) {
+    newRepoSlug = repo.name;
+    showSuggestions = false;
+    highlightedIdx = -1;
+  }
+
+  function clearSlugInput() {
+    newRepoSlug = '';
+    showSuggestions = false;
+    highlightedIdx = -1;
+  }
+
+  function hideSuggestions() {
+    setTimeout(() => { showSuggestions = false; highlightedIdx = -1; }, 200);
   }
 
   async function handleAdd(e) {
@@ -36,7 +122,7 @@
       newRepoSlug = '';
       workspaceRepos.set([]);
       workspaceReposState.set('idle');
-      // Reload projects
+      showSuggestions = false;
       const data = await listProjects();
       projects.set(data.projects || []);
     } catch (e) {
@@ -54,7 +140,6 @@
       showSuccess('Project removed');
       const data = await listProjects();
       projects.set(data.projects || []);
-      // Reset active project if needed
       if ($projects.length === 0) {
         activeProjectId.set(0);
       } else if ($activeProjectId >= $projects.length) {
@@ -67,7 +152,6 @@
     }
   }
 
-  // Reload projects list on refreshTrigger
   $effect(() => {
     void $refreshTrigger;
     (async () => {
@@ -133,80 +217,66 @@
       <div class="add-row">
         <div class="form-group">
           <label class="form-label" for="workspace">Workspace</label>
-          <div class="input-with-button">
-            <input
-              id="workspace"
-              type="text"
-              class="form-input"
-              placeholder="e.g. secutix"
-              bind:value={newWorkspace}
-              required
-            />
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick={() => loadRepos(newWorkspace)}
-            >
-              🔍 Browse
-            </button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="repoSlug">Repository Slug</label>
           <input
-            id="repoSlug"
+            id="workspace"
             type="text"
             class="form-input"
-            placeholder="e.g. infra-bbc_pipeline-tui"
-            bind:value={newRepoSlug}
+            placeholder="e.g. secutix"
+            bind:value={newWorkspace}
+            oninput={handleWorkspaceInput}
             required
           />
+          <span class="form-hint">Start typing to search repositories</span>
+        </div>
+        <div class="form-group slug-group">
+          <label class="form-label" for="repoSlug">Repository Slug</label>
+          <div class="slug-input-wrapper">
+            <input
+              id="repoSlug"
+              type="text"
+              class="form-input"
+              placeholder="e.g. infra-bbc_pipeline-tui"
+              bind:value={newRepoSlug}
+              onkeydown={handleSuggestionKeydown}
+              onfocus={() => { if ($workspaceRepos.length > 0) showSuggestions = true; }}
+              onblur={hideSuggestions}
+              oninput={() => { if ($workspaceRepos.length > 0) showSuggestions = true; highlightedIdx = -1; }}
+              required
+            />
+            {#if newRepoSlug}
+              <button type="button" class="clear-input-btn" onclick={clearSlugInput} tabindex="-1">&times;</button>
+            {/if}
+            {#if showSuggestions && suggestions.length > 0}
+              <div class="suggestions-dropdown">
+                {#each suggestions as repo, i}
+                  <button
+                    type="button"
+                    class="suggestion-item"
+                    class:highlighted={i === highlightedIdx}
+                    onclick={() => selectRepoSlug(repo)}
+                  >
+                    <span class="suggestion-name">{repo.name || repo.full_name}</span>
+                    <span class="suggestion-fullname">{repo.full_name || ''}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          {#if searchLoading}
+            <span class="form-hint loading-hint">🔍 Searching repositories...</span>
+          {:else if $workspaceReposError}
+            <span class="form-hint error-hint">❌ {$workspaceReposError}</span>
+          {:else if $workspaceReposState === 'ready' && $workspaceRepos.length === 0}
+            <span class="form-hint no-results-hint">No repositories found for this workspace</span>
+          {:else if $workspaceReposState === 'ready' && !showSuggestions}
+            <span class="form-hint">{$workspaceRepos.length} repository(s) — click field to browse</span>
+          {/if}
         </div>
         <button type="submit" class="btn btn-primary btn-add" disabled={adding}>
           {adding ? 'Adding...' : '+ Add'}
         </button>
       </div>
     </form>
-
-    <!-- Repository browser results -->
-    {#if workspaceReposState === 'loading'}
-      <div class="repo-results loading-text">Loading repositories...</div>
-    {:else if workspaceReposState === 'error'}
-      <div class="repo-results error-text">❌ {workspaceReposError}</div>
-    {:else if workspaceReposState === 'ready' && workspaceRepos.length > 0}
-      <div class="repo-results">
-        <span class="repo-count">Found {workspaceRepos.length} repositories</span>
-        <div class="repo-grid">
-          {#each workspaceRepos as repo}
-            <button
-              class="repo-chip"
-              onclick={async () => {
-                newRepoSlug = repo.slug;
-                try {
-                  adding = true;
-                  await addProject(newWorkspace.trim(), repo.slug);
-                  showSuccess('Project added successfully');
-                  newRepoSlug = '';
-                  workspaceReposState.set('idle');
-                  workspaceRepos.set([]);
-                  const data = await listProjects();
-                  projects.set(data.projects || []);
-                } catch (e) {
-                  showError(e.message);
-                } finally {
-                  adding = false;
-                }
-              }}
-            >
-              + {repo.name}
-              <span class="repo-slug">{repo.full_name}</span>
-            </button>
-          {/each}
-        </div>
-      </div>
-    {:else if workspaceReposState === 'ready' && workspaceRepos.length === 0}
-      <div class="repo-results">No repositories found for this workspace.</div>
-    {/if}
   </div>
 </div>
 
@@ -263,23 +333,15 @@
     color: #e7e9ea;
   }
 
-  .btn-secondary:hover {
-    background: #3e4144;
-  }
+  .btn-secondary:hover { background: #3e4144; }
 
   .btn-primary {
     background: #1d9bf0;
     color: #fff;
   }
 
-  .btn-primary:hover {
-    background: #1a8cd8;
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  .btn-primary:hover { background: #1a8cd8; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-small {
     padding: 0.25rem 0.75rem;
@@ -290,10 +352,7 @@
     border-radius: 9999px;
     cursor: pointer;
   }
-
-  .btn-small:hover {
-    background: #3e4144;
-  }
+  .btn-small:hover { background: #3e4144; }
 
   .btn-danger-small {
     padding: 0.25rem 0.5rem;
@@ -304,15 +363,8 @@
     border-radius: 9999px;
     cursor: pointer;
   }
-
-  .btn-danger-small:hover {
-    background: #991b1b;
-  }
-
-  .btn-danger-small:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  .btn-danger-small:hover { background: #991b1b; }
+  .btn-danger-small:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .btn-add {
     height: fit-content;
@@ -336,9 +388,7 @@
     transition: border-color 0.15s;
   }
 
-  .project-card.active {
-    border-color: #1d9bf0;
-  }
+  .project-card.active { border-color: #1d9bf0; }
 
   .project-info {
     display: flex;
@@ -346,9 +396,7 @@
     gap: 0.2rem;
   }
 
-  .project-name {
-    font-weight: 600;
-  }
+  .project-name { font-weight: 600; }
 
   .project-meta {
     display: flex;
@@ -357,13 +405,8 @@
     color: #8b949e;
   }
 
-  .meta-label {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .meta-id {
-    color: #484f58;
-  }
+  .meta-label { font-family: 'SF Mono', 'Fira Code', monospace; }
+  .meta-id { color: #484f58; }
 
   .project-actions {
     display: flex;
@@ -379,7 +422,7 @@
   .add-row {
     display: flex;
     gap: 1rem;
-    align-items: flex-end;
+    align-items: flex-start;
     flex-wrap: wrap;
   }
 
@@ -388,7 +431,7 @@
     flex-direction: column;
     gap: 0.35rem;
     flex: 1;
-    min-width: 160px;
+    min-width: 200px;
   }
 
   .form-label {
@@ -396,6 +439,16 @@
     font-weight: 600;
     color: #8b949e;
   }
+
+  .form-hint {
+    font-size: 0.72rem;
+    color: #484f58;
+    min-height: 1em;
+  }
+
+  .loading-hint { color: #8b949e; }
+  .error-hint { color: #f4a2a2; }
+  .no-results-hint { color: #c6903b; }
 
   .form-input {
     background: #0d1117;
@@ -409,76 +462,86 @@
     box-sizing: border-box;
   }
 
-  .form-input:focus {
-    border-color: #1d9bf0;
-  }
+  .form-input:focus { border-color: #1d9bf0; }
+  .form-input::placeholder { color: #484f58; }
 
-  .form-input::placeholder {
-    color: #484f58;
-  }
+  .slug-group { flex: 2; }
 
-  .input-with-button {
+  .slug-input-wrapper {
+    position: relative;
     display: flex;
-    gap: 0.35rem;
+    align-items: center;
   }
 
-  .input-with-button .form-input {
-    flex: 1;
-  }
+  .slug-input-wrapper .form-input { padding-right: 2rem; }
 
-  .repo-results {
-    margin-top: 0.75rem;
-    padding: 1rem;
-    background: #1a1d23;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
-  }
-
-  .repo-count {
-    display: block;
-    margin-bottom: 0.75rem;
-    font-size: 0.85rem;
+  .clear-input-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
     color: #8b949e;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1;
+    border-radius: 4px;
   }
 
-  .repo-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    max-height: 300px;
+  .clear-input-btn:hover {
+    color: #e7e9ea;
+    background: #2f3336;
+  }
+
+  .suggestions-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: #1a1d23;
+    border: 1px solid #1d9bf0;
+    border-radius: 8px;
+    max-height: 240px;
     overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   }
 
-  .repo-chip {
+  .suggestion-item {
     display: flex;
     flex-direction: column;
-    background: #0d1117;
-    border: 1px solid #2f3336;
-    border-radius: 8px;
+    align-items: flex-start;
+    width: 100%;
     padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid #21262d;
     color: #e7e9ea;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.85rem;
+    transition: background 0.1s;
+  }
+
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: #1d2e3e; }
+  .suggestion-item.highlighted { background: #1d3e5e; }
+
+  .suggestion-name {
+    font-weight: 600;
     font-size: 0.85rem;
   }
 
-  .repo-chip:hover {
-    border-color: #1d9bf0;
-    background: #1d2e3e;
-  }
-
-  .repo-slug {
-    font-size: 0.7rem;
+  .suggestion-fullname {
+    font-size: 0.72rem;
     color: #8b949e;
     font-family: 'SF Mono', 'Fira Code', monospace;
   }
 
-  .loading-text {
-    color: #8b949e;
-  }
-
-  .error-text {
-    color: #f4a2a2;
-  }
+  .suggestions-dropdown::-webkit-scrollbar { width: 6px; }
+  .suggestions-dropdown::-webkit-scrollbar-track { background: #1a1d23; }
+  .suggestions-dropdown::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
 </style>

@@ -1,130 +1,136 @@
 import { readable, get } from 'svelte/store';
-import { activeProjectId, selectedPipeline, logStepUUID } from './appState.js';
+import { activeProject, selectedPipeline } from './appState.js';
 
 /**
  * Hash-based router for the BBC Pipeline Manager SPA.
  *
  * Routes:
- *   #/list/<n>                         – Pipeline list for project at index n
- *   #/detail/<n>/<pipelineUUID>        – Pipeline detail for a given pipeline
- *   #/logs/<n>/<pipelineUUID>/<stepUUID> – Step log viewer
- *   #/trigger/<n>                      – Trigger pipeline form
- *   #/manage                           – Manage projects (no project needed)
+ *   #/manage                                           – Manage projects
+ *   #/bbc/<workspace>/<repoSlug>                       – Pipeline list
+ *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>         – Pipeline detail
+ *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>/logs/<stepNum> – Step log viewer
+ *   #/bbc/<workspace>/<repoSlug>/trigger               – Trigger pipeline form
  */
 
-const VALID_PAGES = new Set(['list', 'detail', 'logs', 'trigger', 'manage']);
-const PROJECT_PAGES = new Set(['list', 'detail', 'logs', 'trigger']);
-const PIPELINE_PAGES = new Set(['detail', 'logs']);
-const STEP_PAGES = new Set(['logs']);
-
 /**
- * Parse the current hash into { page, projectIndex, pipelineUUID, stepUUID }.
+ * Parse the current hash into { page, workspace, repoSlug, pipelineUUID, stepNum }.
  */
 function parseHash() {
   const hash = window.location.hash;
-  if (!hash.startsWith('#/')) return { page: '', projectIndex: null, pipelineUUID: null, stepUUID: null };
+  // #/manage
+  if (hash === '#/manage') {
+    return { page: 'manage', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+  }
 
-  const parts = hash.slice(2).split('/').map(s => decodeURIComponent(s));
-  const page = parts[0];
-  if (!VALID_PAGES.has(page)) return { page: '', projectIndex: null, pipelineUUID: null, stepUUID: null };
+  // #/bbc/workspace/repoSlug/...
+  const bbcMatch = hash.match(/^#\/bbc\/([^/]+)\/([^/]+)(?:\/(.*))?$/);
+  if (!bbcMatch) return { page: '', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
 
-  let projectIndex = null;
-  if (PROJECT_PAGES.has(page) && parts[1] !== undefined) {
-    const n = parseInt(parts[1], 10);
-    if (!isNaN(n) && n >= 0 && Number.isInteger(n)) {
-      projectIndex = n;
+  const workspace = decodeURIComponent(bbcMatch[1]);
+  const repoSlug = decodeURIComponent(bbcMatch[2]);
+  const rest = bbcMatch[3] || '';
+
+  if (!rest) {
+    return { page: 'list', workspace, repoSlug, pipelineUUID: null, stepNum: null };
+  }
+
+  // Check for trigger
+  if (rest === 'trigger') {
+    return { page: 'trigger', workspace, repoSlug, pipelineUUID: null, stepNum: null };
+  }
+
+  // Rest could be: pipelineUUID or pipelineUUID/logs/stepNum
+  const parts = rest.split('/');
+  const pipelineUUID = parts[0] || null;
+
+  if (parts.length === 1) {
+    return { page: 'detail', workspace, repoSlug, pipelineUUID, stepNum: null };
+  }
+
+  if (parts.length >= 3 && parts[1] === 'logs') {
+    const stepNum = parseInt(parts[2], 10);
+    if (!isNaN(stepNum) && stepNum >= 0) {
+      return { page: 'logs', workspace, repoSlug, pipelineUUID, stepNum };
     }
   }
 
-  let pipelineUUID = null;
-  if (PIPELINE_PAGES.has(page) && parts[2] !== undefined && parts[2] !== '') {
-    pipelineUUID = parts[2];
-  }
-
-  let stepUUID = null;
-  if (STEP_PAGES.has(page) && parts[3] !== undefined && parts[3] !== '') {
-    stepUUID = parts[3];
-  }
-
-  return { page, projectIndex, pipelineUUID, stepUUID };
+  return { page: '', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
 }
 
 /**
  * Navigate to a page.
+ *   navigateTo('manage')
  *   navigateTo('list')
  *   navigateTo('detail', pipelineUUID)
- *   navigateTo('logs', pipelineUUID, stepUUID)
+ *   navigateTo('logs', pipelineUUID, stepNum)
  *   navigateTo('trigger')
- *   navigateTo('manage')
  *
- * If pipelineUUID or stepUUID are omitted, they are pulled from current store state.
+ * Workspace and repoSlug are pulled from the activeProject store.
  */
-export function navigateTo(page, pipelineUUID, stepUUID) {
-  if (!VALID_PAGES.has(page)) {
-    console.error(`Invalid page: ${page}`);
-    return;
-  }
+export function navigateTo(page, pipelineUUID, stepNum) {
   if (page === 'manage') {
     window.location.hash = '#/manage';
     return;
   }
 
-  const id = get(activeProjectId);
-  const projIdx = id >= 0 ? id : 0;
-  const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
-  const suuid = stepUUID !== undefined ? stepUUID : get(logStepUUID);
+  const proj = get(activeProject);
+  if (!proj || !proj.workspace || !proj.repo_slug) {
+    console.error('No active project to build URL');
+    return;
+  }
+  const ws = encodeURIComponent(proj.workspace);
+  const rs = encodeURIComponent(proj.repo_slug);
 
-  if (page === 'list' || page === 'trigger') {
-    window.location.hash = `#/${page}/${projIdx}`;
+  if (page === 'list') {
+    window.location.hash = `#/bbc/${ws}/${rs}`;
+  } else if (page === 'trigger') {
+    window.location.hash = `#/bbc/${ws}/${rs}/trigger`;
   } else if (page === 'detail') {
+    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
     if (puuid) {
-      window.location.hash = `#/${page}/${projIdx}/${puuid}`;
+      window.location.hash = `#/bbc/${ws}/${rs}/${puuid}`;
     } else {
-      window.location.hash = `#/${page}/${projIdx}`;
+      window.location.hash = `#/bbc/${ws}/${rs}`;
     }
   } else if (page === 'logs') {
-    if (puuid && suuid) {
-      window.location.hash = `#/${page}/${projIdx}/${puuid}/${suuid}`;
-    } else if (puuid) {
-      window.location.hash = `#/${page}/${projIdx}/${puuid}`;
+    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
+    const sn = stepNum !== undefined ? stepNum : 0;
+    if (puuid) {
+      window.location.hash = `#/bbc/${ws}/${rs}/${puuid}/logs/${sn}`;
     } else {
-      window.location.hash = `#/${page}/${projIdx}`;
+      window.location.hash = `#/bbc/${ws}/${rs}`;
     }
   }
 }
 
-/**
- * Reactive store reflecting the current hash-based page.
- */
+// ── Reactive stores derived from URL hash ────────────────────────────────────
+
 export const page = readable(parseHash().page, (set) => {
   const handler = () => set(parseHash().page);
   window.addEventListener('hashchange', handler);
   return () => window.removeEventListener('hashchange', handler);
 });
 
-/**
- * Reactive store reflecting the project index from the URL hash.
- */
-export const projectIndexFromUrl = readable(parseHash().projectIndex, (set) => {
-  const handler = () => set(parseHash().projectIndex);
+export const workspaceFromUrl = readable(parseHash().workspace, (set) => {
+  const handler = () => set(parseHash().workspace);
   window.addEventListener('hashchange', handler);
   return () => window.removeEventListener('hashchange', handler);
 });
 
-/**
- * Reactive store reflecting the pipeline UUID from the URL hash.
- */
+export const repoSlugFromUrl = readable(parseHash().repoSlug, (set) => {
+  const handler = () => set(parseHash().repoSlug);
+  window.addEventListener('hashchange', handler);
+  return () => window.removeEventListener('hashchange', handler);
+});
+
 export const pipelineUUIDFromUrl = readable(parseHash().pipelineUUID, (set) => {
   const handler = () => set(parseHash().pipelineUUID);
   window.addEventListener('hashchange', handler);
   return () => window.removeEventListener('hashchange', handler);
 });
 
-/**
- * Reactive store reflecting the step UUID from the URL hash.
- */
-export const stepUUIDFromUrl = readable(parseHash().stepUUID, (set) => {
-  const handler = () => set(parseHash().stepUUID);
+export const stepNumFromUrl = readable(parseHash().stepNum, (set) => {
+  const handler = () => set(parseHash().stepNum);
   window.addEventListener('hashchange', handler);
   return () => window.removeEventListener('hashchange', handler);
 });

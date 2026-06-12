@@ -36,9 +36,9 @@
 
 <nav class="navbar">
   <div class="nav-left">
-    <span class="nav-brand" onclick={() => navigateTo('list')}>
+    <button class="nav-brand" onclick={() => navigateTo('list')}>
       🚀 BBC Pipeline Manager
-    </span>
+    </button>
     {#if projectCount > 0}
       <span class="nav-sep">/</span>
       <div class="project-dropdown">
@@ -116,6 +116,9 @@
     font-size: 1.1rem;
     cursor: pointer;
     color: #e7e9ea;
+    background: none;
+    border: none;
+    font-family: inherit;
   }
 
   .nav-brand:hover {

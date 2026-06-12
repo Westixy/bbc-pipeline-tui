@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, tick } from 'svelte';
   import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
-  import { navigateTo } from '../stores/router.js';
+  import { navigateTo, stepNumFromUrl } from '../stores/router.js';
   import { getStepLog } from '../stores/api.js';
 
   let logState = $state('idle'); // 'idle' | 'loading' | 'ready' | 'error'
@@ -380,12 +380,15 @@
   let logLoadedForStep = null;
 
   $effect(() => {
-    if ($selectedSteps.length === 0 || !$selectedSteps[0]?.uuid) return;
-    const stepId = `${$selectedSteps[0].uuid}-${$refreshTrigger}`;
+    if ($selectedSteps.length === 0) return;
+    const idx = typeof $stepNumFromUrl === 'number' && $stepNumFromUrl >= 0 ? $stepNumFromUrl : 0;
+    const step = $selectedSteps[idx];
+    if (!step?.uuid) return;
+    const stepId = `${step.uuid}-${$refreshTrigger}`;
     if (logLoadedForStep === stepId) return;
     logLoadedForStep = stepId;
-    loadLog(0);
-    startAutoRefresh(0);
+    loadLog(idx);
+    startAutoRefresh(idx);
   });
 
   onDestroy(() => {
@@ -521,7 +524,7 @@
           onclick={() => {
             loadLog(i);
             startAutoRefresh(i);
-            navigateTo('logs', $selectedPipeline?.uuid, step.uuid);
+            navigateTo('logs', $selectedPipeline?.uuid, i);
           }}
         >
           <span class="tab-icon">
