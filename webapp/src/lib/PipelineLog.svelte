@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, tick } from 'svelte';
   import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
-  import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl } from '../stores/router.js';
+  import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
   import { getStepLog, getPipeline } from '../stores/api.js';
 
   let logState = $state('idle');
@@ -113,6 +113,10 @@
     const urlUuid = $pipelineUUIDFromUrl;
     if (!$activeProject || !urlUuid || bootstrapped) return;
     if ($selectedSteps.length > 0) return; // already have steps, main effect will handle
+    // Wait until the activeProject matches the URL workspace/repoSlug
+    const urlWs = $workspaceFromUrl;
+    const urlRs = $repoSlugFromUrl;
+    if ($activeProject.workspace !== urlWs || $activeProject.repo_slug !== urlRs) return;
     bootstrapped = true;
     bootstrapFromUrl(urlUuid);
   });

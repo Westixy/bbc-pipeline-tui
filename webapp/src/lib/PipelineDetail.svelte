@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
-  import { page, pipelineUUIDFromUrl, navigateTo } from '../stores/router.js';
+  import { page, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo } from '../stores/router.js';
   import { getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
@@ -183,9 +183,12 @@
 
   // Bootstrap from URL when stores are empty (page reload scenario)
   $effect(() => {
-    if ($page !== 'detail' || !$activeProject || bootstrapped) return;
     const urlUuid = $pipelineUUIDFromUrl;
-    if (!urlUuid) return;
+    if ($page !== 'detail' || !$activeProject || !urlUuid || bootstrapped) return;
+    // Wait until the activeProject matches the URL workspace/repoSlug
+    const urlWs = $workspaceFromUrl;
+    const urlRs = $repoSlugFromUrl;
+    if ($activeProject.workspace !== urlWs || $activeProject.repo_slug !== urlRs) return;
     // Don't double-load if selectedPipeline is already being loaded by the main effect
     if ($selectedPipeline?.uuid === urlUuid) return;
     bootstrapped = true;
