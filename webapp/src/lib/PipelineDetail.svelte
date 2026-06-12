@@ -48,7 +48,9 @@
         return;
       }
       const pipe = $selectedPipeline;
-      if (pipe?.state?.name === 'IN_PROGRESS' || pipe?.state?.name === 'PENDING' || pipe?.state?.name === 'IN_PROGRESS_STOPPING') {
+      const steps = $selectedSteps;
+      const hasRunningStep = steps.some(s => s?.state?.name === 'IN_PROGRESS');
+      if (pipe?.state?.name === 'IN_PROGRESS' || pipe?.state?.name === 'PENDING' || pipe?.state?.name === 'IN_PROGRESS_STOPPING' || hasRunningStep) {
         loadDetail(true);
       } else {
         stopAutoRefresh();
