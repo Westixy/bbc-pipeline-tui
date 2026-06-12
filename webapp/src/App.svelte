@@ -1,6 +1,6 @@
 <script>
   import { projects, activeProjectId, activeProject, notification } from './stores/appState.js';
-  import { page, initRoute, navigateTo } from './stores/router.js';
+  import { page, initRoute, navigateTo, projectIndexFromUrl } from './stores/router.js';
   import { listProjects } from './stores/api.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
@@ -12,7 +12,7 @@
 
   let loading = $state(true);
   let loadError = $state(null);
-  let dataLoaded = false; // plain variable — run only once on mount
+  let dataLoaded = false;
 
   async function loadData() {
     loading = true;
@@ -20,11 +20,14 @@
     try {
       const data = await listProjects();
       projects.set(data.projects || []);
-      if ((data.projects || []).length > 0) {
+      const count = (data.projects || []).length;
+      // If a valid project index is in the URL, restore it; otherwise default to 0
+      if (count > 0 && $projectIndexFromUrl !== null && $projectIndexFromUrl < count) {
+        activeProjectId.set($projectIndexFromUrl);
+      } else if (count > 0) {
         activeProjectId.set(0);
       }
-      // Initialize hash routing to the right default page
-      initRoute((data.projects || []).length > 0);
+      initRoute(count > 0);
     } catch (e) {
       console.error('Failed to load projects:', e);
       loadError = e.message || 'Failed to load projects';
@@ -33,7 +36,26 @@
     }
   }
 
-  // Trigger load on mount
+  // Keep activeProjectId in the URL for project-dependent pages
+  $effect(() => {
+    void $page;
+    void $activeProjectId;
+    if ($page && $page !== 'manage') {
+      const expectedHash = `#/${$page}/${$activeProjectId}`;
+      if (window.location.hash !== expectedHash) {
+        window.location.hash = expectedHash;
+      }
+    }
+  });
+
+  // Restore activeProjectId from URL when navigating
+  $effect(() => {
+    const idx = $projectIndexFromUrl;
+    if (idx !== null && idx >= 0 && idx !== $activeProjectId && idx < $projects.length) {
+      activeProjectId.set(idx);
+    }
+  });
+
   $effect(() => {
     if (dataLoaded) return;
     dataLoaded = true;

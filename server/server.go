@@ -320,7 +320,7 @@ func (s *Server) handleGetStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	step, err := s.client.GetPipelineStep(project.Workspace, project.RepoSlug, ensureBraces(r.PathValue("uuid")), r.PathValue("stepUuid"))
+	step, err := s.client.GetPipelineStep(project.Workspace, project.RepoSlug, ensureBraces(r.PathValue("uuid")), ensureBraces(r.PathValue("stepUuid")))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -335,7 +335,7 @@ func (s *Server) handleGetStepLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logContent, err := s.client.GetStepLog(project.Workspace, project.RepoSlug, ensureBraces(r.PathValue("uuid")), r.PathValue("stepUuid"))
+	logContent, err := s.client.GetStepLog(project.Workspace, project.RepoSlug, ensureBraces(r.PathValue("uuid")), ensureBraces(r.PathValue("stepUuid")))
 	if err != nil {
 		writeError(w, err)
 		return

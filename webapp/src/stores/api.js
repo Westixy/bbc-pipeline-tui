@@ -60,10 +60,15 @@ export function getStepLog(projectId, pipelineUuid, stepUuid) {
   return request(`/projects/${projectId}/pipelines/${cleanUuid(pipelineUuid)}/steps/${cleanUuid(stepUuid)}/log`);
 }
 
-export function triggerPipeline(projectId, target, variables = []) {
+export function triggerPipeline(projectId, target, variables = [], selector = null) {
+  const targetPayload = { ref_name: target, type: 'pipeline_ref_target', ref_type: 'branch' };
+  if (selector) targetPayload.selector = selector;
   return request(`/projects/${projectId}/pipelines`, {
     method: 'POST',
-    body: JSON.stringify({ target, variables }),
+    body: JSON.stringify({
+      target: targetPayload,
+      variables,
+    }),
   });
 }
 

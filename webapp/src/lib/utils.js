@@ -46,6 +46,7 @@ export function statusLabel(state) {
   if (name === 'completed') {
     const result = (state.result?.name || '').toLowerCase();
     if (result === 'failed' || result === 'error') return 'failed';
+    if (result === 'stopped') return 'stopped';
     return 'succeeded';
   }
   if (name === 'in_progress') return 'running';
@@ -65,6 +66,7 @@ export function statusClassForState(state) {
   if (name === 'completed') {
     const result = (state.result?.name || '').toLowerCase();
     if (result === 'failed' || result === 'error') return 'status-error';
+    if (result === 'stopped') return 'status-stopped';
     return 'status-success';
   }
   if (name === 'failed' || name === 'error') return 'status-error';

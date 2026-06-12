@@ -16,7 +16,7 @@
           pname = "bbc-pipeline-webapp";
           version = "1.0.0";
           src = ./webapp;
-          npmDepsHash = "sha256-0000000000000000000000000000000000000000000=";
+          npmDepsHash = "sha256-iycuonvJ1TQMAYBrOXK24nkCWY8hLLKapVXjkaOwoBc=";
           dontNpmBuild = true;
           buildPhase = ''
             runHook preBuild
@@ -26,7 +26,7 @@
           installPhase = ''
             runHook preInstall
             mkdir -p $out
-            cp -r dist/* $out/
+            cp -r "$NIX_BUILD_TOP/server/webapp-dist/"* "$out/"
             runHook postInstall
           '';
         };
