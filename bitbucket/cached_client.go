@@ -94,27 +94,10 @@ func (cc *CachedClient) GetPipelineStep(workspace, repoSlug, pipelineUUID, stepU
 	return cachedGet[PipelineStep](cc, path, 5*time.Second, DefaultMaxEntrySize)
 }
 
-// GetStepLog fetches a step log with caching (longer TTL, size cap).
+// GetStepLog fetches a step log. Logs are never cached — they change frequently
+// during pipeline execution and caching would show stale content.
 func (cc *CachedClient) GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID string) (string, error) {
-	path := BuildPipelinePath(workspace, repoSlug,
-		"pipelines/"+url.PathEscape(pipelineUUID)+"/steps/"+url.PathEscape(stepUUID)+"/log")
-
-	// Check cache
-	key := path
-	if data, ok := cc.cache.Get(key); ok {
-		return string(data), nil
-	}
-
-	// Fetch
-	logContent, err := cc.Client.GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID)
-	if err != nil {
-		return "", err
-	}
-
-	// Store
-	cc.cache.Set(key, []byte(logContent), LogCacheTTL, DefaultMaxEntrySize)
-
-	return logContent, nil
+	return cc.Client.GetStepLog(workspace, repoSlug, pipelineUUID, stepUUID)
 }
 
 // GetFullURL fetches a full URL with caching.

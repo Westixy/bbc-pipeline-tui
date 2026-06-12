@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
-  import { page, navigateTo } from '../stores/router.js';
+  import { page, pipelineUUIDFromUrl, navigateTo } from '../stores/router.js';
   import { getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
@@ -166,7 +166,9 @@
 
   let lastProjectId = null;
   let detailLoadedFor = null;
+  let bootstrapped = $state(false);
 
+  // Main effect: load detail when selectedPipeline is available
   $effect(() => {
     if ($page !== 'detail' || !$activeProject || !$selectedPipeline?.uuid) return;
     if ($activeProject.id !== lastProjectId) {
@@ -178,6 +180,48 @@
     detailLoadedFor = pipeId;
     loadDetail();
   });
+
+  // Bootstrap from URL when stores are empty (page reload scenario)
+  $effect(() => {
+    if ($page !== 'detail' || !$activeProject || bootstrapped) return;
+    const urlUuid = $pipelineUUIDFromUrl;
+    if (!urlUuid) return;
+    // Don't double-load if selectedPipeline is already being loaded by the main effect
+    if ($selectedPipeline?.uuid === urlUuid) return;
+    bootstrapped = true;
+    detailLoadedFor = `${$activeProject.id}-${urlUuid}-${$refreshTrigger}`;
+    loadDetailFromUrl(urlUuid);
+  });
+
+  async function loadDetailFromUrl(uuid) {
+    detailState.set('loading');
+    try {
+      const [pipeResp, varsResp, logVarsResp] = await Promise.all([
+        getPipeline($activeProject.id, uuid),
+        listVariables($activeProject.id).catch(() => ({ variables: [] })),
+        getLogVariables($activeProject.id, uuid).catch(() => ({ variables: [] })),
+      ]);
+      const pipelineData = pipeResp.pipeline || pipeResp;
+      const stepsData = pipeResp.steps || [];
+      const varsData = varsResp.variables || [];
+      const logVarsData = logVarsResp.variables || [];
+      selectedPipeline.set(pipelineData);
+      selectedSteps.set(stepsData);
+      selectedVariables.set(varsData);
+      selectedLogVariables.set(logVarsData);
+      detailState.set('ready');
+      lastRefreshed = new Date();
+      updateElapsed();
+      if (pipelineData?.state?.name === 'IN_PROGRESS' || pipelineData?.state?.name === 'PENDING' || pipelineData?.state?.name === 'IN_PROGRESS_STOPPING') {
+        startAutoRefresh();
+      } else {
+        stopAutoRefresh();
+      }
+    } catch (e) {
+      showError(e.message);
+      detailState.set('error');
+    }
+  }
 
   $effect(() => {
     function onRefresh() {

@@ -1,7 +1,8 @@
 <script>
   import './app.css';
-  import { projects } from './stores/appState.js';
-  import { page, initRoute } from './stores/router.js';
+  import { projects, activeProjectId, showError } from './stores/appState.js';
+  import { page, workspaceFromUrl, repoSlugFromUrl, initRoute } from './stores/router.js';
+  import { listProjects } from './stores/api.js';
   import Navbar from './lib/Navbar.svelte';
   import PipelineList from './lib/PipelineList.svelte';
   import PipelineDetail from './lib/PipelineDetail.svelte';
@@ -16,9 +17,34 @@
     document.title = ($projects.length > 0 ? `BBC Pipeline Manager — ${$projects[0]?.name || 'Loading…'}` : 'BBC Pipeline Manager');
   });
 
-  // Navigate to the correct page once projects are resolved
+  // Load projects on initial app mount
   $effect(() => {
-    initRoute($projects.length > 0);
+    let cancelled = false;
+    async function load() {
+      try {
+        const data = await listProjects();
+        if (cancelled) return;
+        projects.set(data.projects || []);
+      } catch (e) {
+        if (!cancelled) showError(e.message);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  });
+
+  // Match URL workspace/repoSlug to activeProject on reload
+  $effect(() => {
+    const all = $projects;
+    const ws = $workspaceFromUrl;
+    const rs = $repoSlugFromUrl;
+    if (all.length === 0 || !ws || !rs) return;
+    const idx = all.findIndex(p => p.workspace === ws && p.repo_slug === rs);
+    if (idx >= 0) {
+      activeProjectId.set(idx);
+    }
+    // Once we've matched or not, finalize routing
+    initRoute(all.length > 0);
   });
 </script>
 

@@ -1,8 +1,8 @@
 <script>
   import { get } from 'svelte/store';
-  import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger } from '../stores/appState.js';
+  import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
-  import { listPipelines } from '../stores/api.js';
+  import { listPipelines, getLogVariables, getPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, statusLabel } from './utils.js';
 
   let root = $state(null);
@@ -123,9 +123,90 @@
     return trigger?.name || '—';
   }
 
+  function truncateVal(val) {
+    if (!val) return '—';
+    return val.length > 60 ? val.slice(0, 60) + '…' : val;
+  }
+
+  // ── Direct log access for running pipelines ─────────────────────────
+  let logLoadingFor = $state(null); // pipeline uuid currently loading
+
+  async function goToLog(pipeline) {
+    if (!$activeProject || !pipeline?.uuid) return;
+    const pUuid = pipeline.uuid;
+    logLoadingFor = pUuid;
+    try {
+      const data = await getPipeline($activeProject.id, pUuid);
+      const steps = data.steps || [];
+      // Find the first step that is IN_PROGRESS or get the last non-pending step
+      const runningStep = steps.find(s => s.state?.name === 'IN_PROGRESS');
+      const targetStep = runningStep || steps.find(s => s.state?.name !== 'NOT_STARTED') || steps[0];
+      if (!targetStep) return;
+      const stepIdx = steps.indexOf(targetStep);
+      selectedPipeline.set(data.pipeline || data);
+      selectedSteps.set(steps);
+      logStepName.set(targetStep.name || `Step ${stepIdx + 1}`);
+      logStepUUID.set(targetStep.uuid);
+      navigateTo('logs', pUuid, stepIdx);
+    } catch (e) {
+      // Silently fail — user can still click through to detail
+    } finally {
+      logLoadingFor = null;
+    }
+  }
+
   let lastLoaded = '';
   let selectedIndex = $state(null);
   let gridBody = $state(null);
+
+  // ── Hover popover for log variables ──────────────────────────────────
+  let hoveredPipeline = $state(null);
+  let hoverVars = $state([]);
+  let hoverVarsLoading = $state(false);
+  let hoverVarsError = $state('');
+  let hoverPos = $state({ x: 0, y: 0 });
+  let hoverTimer = $state(null);
+  let hoverActive = $state(false);
+
+  async function fetchHoverVars(pipe) {
+    if (!$activeProject || !pipe?.uuid) return;
+    hoverVarsLoading = true;
+    hoverVarsError = '';
+    hoverVars = [];
+    try {
+      const data = await getLogVariables($activeProject.id, pipe.uuid);
+      hoverVars = data.variables || [];
+    } catch (e) {
+      hoverVarsError = e.message;
+    } finally {
+      hoverVarsLoading = false;
+    }
+  }
+
+  function onRowMouseEnter(e, pipe) {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverPos = { x: e.clientX, y: e.clientY };
+    hoverTimer = setTimeout(() => {
+      hoveredPipeline = pipe;
+      hoverActive = true;
+      fetchHoverVars(pipe);
+    }, 400);
+  }
+
+  function onRowMouseMove(e) {
+    if (hoverActive) {
+      hoverPos = { x: e.clientX, y: e.clientY };
+    }
+  }
+
+  function onRowMouseLeave() {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = null;
+    hoverActive = false;
+    hoveredPipeline = null;
+    hoverVars = [];
+    hoverVarsError = '';
+  }
 
   // ── Infinite-scroll IntersectionObserver ──────────────────────────────
   $effect(() => {
@@ -244,6 +325,7 @@
         <div class="data-grid-cell col-dur" aria-hidden="true">DUR</div>
         <div class="data-grid-cell col-creator" aria-hidden="true">CREATOR</div>
         <div class="data-grid-cell col-date" aria-hidden="true">CREATED</div>
+        <div class="data-grid-cell col-log-hdr" aria-hidden="true"></div>
       </div>
       {#each Array(10) as _}
         <div class="data-grid-row skeleton-row">
@@ -255,6 +337,7 @@
           <div class="data-grid-cell col-dur"><div class="skeleton sk-dur"></div></div>
           <div class="data-grid-cell col-creator"><div class="skeleton sk-name"></div></div>
           <div class="data-grid-cell col-date"><div class="skeleton sk-date"></div></div>
+          <div class="data-grid-cell col-log"></div>
         </div>
       {/each}
     </div>
@@ -299,6 +382,7 @@
         <div class="data-grid-cell col-dur">DUR</div>
         <div class="data-grid-cell col-creator">CREATOR</div>
         <div class="data-grid-cell col-date">CREATED</div>
+        <div class="data-grid-cell col-log-hdr"></div>
       </div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -320,6 +404,9 @@
             aria-selected={selectedIndex === index}
             onclick={() => viewDetail(pipe)}
             onkeydown={(e) => handleRowKeydown(e, index)}
+            onmouseenter={(e) => onRowMouseEnter(e, pipe)}
+            onmousemove={onRowMouseMove}
+            onmouseleave={onRowMouseLeave}
           >
             <div class="data-grid-cell col-build">
               <span class="mono build-num">#{pipe.build_number || '—'}</span>
@@ -354,6 +441,22 @@
             </div>
             <div class="data-grid-cell col-date text-tertiary">
               {formatDate(pipe.created_on)}
+            </div>
+            <div class="data-grid-cell col-log">
+              {#if pipe.state?.name === 'IN_PROGRESS' || pipe.state?.name === 'PENDING'}
+                <button
+                  class="btn btn-secondary btn-xs"
+                  onclick={(e) => { e.stopPropagation(); goToLog(pipe); }}
+                  disabled={logLoadingFor === pipe.uuid}
+                  title="Open running step log"
+                >
+                  {#if logLoadingFor === pipe.uuid}
+                    <span class="spinner spinner-xs"></span>
+                  {:else}
+                    Log
+                  {/if}
+                </button>
+              {/if}
             </div>
           </div>
         {/each}
@@ -393,6 +496,36 @@
   <!-- ── Global loading bar ──────────────────────────────── -->
   {#if loading && $pipelines.length > 0}
     <div class="loading-indicator"></div>
+  {/if}
+
+  <!-- ── Hover popover for log variables ─────────────────── -->
+  {#if hoverActive && hoveredPipeline}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="vars-popover"
+      style="left: {hoverPos.x + 12}px; top: {hoverPos.y - 8}px"
+      onmouseenter={() => { if (hoverTimer) clearTimeout(hoverTimer); }}
+      onmouseleave={onRowMouseLeave}
+    >
+      <div class="vars-popover-header">
+        <span class="vars-popover-title">#{hoveredPipeline.build_number || '—'} variables</span>
+        {#if hoverVarsLoading}
+          <span class="spinner vars-spinner"></span>
+        {:else if hoverVarsError}
+          <span class="vars-popover-error">{hoverVarsError}</span>
+        {/if}
+      </div>
+      {#if !hoverVarsLoading && !hoverVarsError && hoverVars.length > 0}
+        <div class="vars-popover-grid">
+          {#each hoverVars as v}
+            <div class="vp-key">{v.key}</div>
+            <div class="vp-val" class:vp-val-secret={v.secured} title={v.secured ? '' : v.value}>{v.secured ? '••••••••' : truncateVal(v.value)}</div>
+          {/each}
+        </div>
+      {:else if !hoverVarsLoading && !hoverVarsError && hoverVars.length === 0}
+        <div class="vars-popover-empty">No variables for this pipeline</div>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -580,6 +713,8 @@
   .col-dur        { flex: 0 0 5.5rem;  justify-content: flex-end; }
   .col-creator    { flex: 1 1 7rem;    min-width: 5.5rem; }
   .col-date       { flex: 0 0 9rem;    white-space: nowrap; }
+  .col-log-hdr    { flex: 0 0 3.2rem; }
+  .col-log        { flex: 0 0 3.2rem;  justify-content: center; padding: var(--space-2) var(--space-1); }
 
   .build-num {
     font-weight: 600;
@@ -749,5 +884,86 @@
     font-family: var(--font-mono);
     font-weight: 600;
     color: var(--text-tertiary);
+  }
+
+  /* ── Hover popover for log variables ───────────────────────── */
+  .vars-popover {
+    position: fixed;
+    z-index: 1000;
+    min-width: 220px;
+    max-width: 340px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-dropdown);
+    padding: var(--space-3);
+    pointer-events: auto;
+    animation: popIn 0.12s ease-out;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .vars-popover-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .vars-popover-title {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+  .vars-spinner {
+    width: 12px;
+    height: 12px;
+    border-width: 2px;
+  }
+  .vars-popover-error {
+    font-size: 10.5px;
+    color: var(--danger-text);
+  }
+
+  .vars-popover-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px var(--space-3);
+    align-items: baseline;
+  }
+  .vp-key {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    padding: 1px 0;
+    min-width: 0;
+  }
+  .vp-val {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    word-break: break-all;
+    padding: 1px 0;
+    min-width: 0;
+  }
+  .vp-val-secret {
+    color: var(--text-tertiary);
+    font-style: italic;
+    letter-spacing: 0.15em;
+  }
+
+  .vars-popover-empty {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: var(--space-2) 0;
   }
 </style>

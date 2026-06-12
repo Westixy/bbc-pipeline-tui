@@ -1,8 +1,8 @@
 <script>
   import { onDestroy, tick } from 'svelte';
   import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
-  import { navigateTo, stepNumFromUrl } from '../stores/router.js';
-  import { getStepLog } from '../stores/api.js';
+  import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl } from '../stores/router.js';
+  import { getStepLog, getPipeline } from '../stores/api.js';
 
   let logState = $state('idle');
   let logError = $state('');
@@ -106,12 +106,40 @@
   }
 
   let latestRequestId = 0; let consecutiveErrorCount = 0; const MAX_CONSECUTIVE_ERRORS = 3; let logLoadedForStep = null;
+  let bootstrapped = $state(false);
 
-  async function loadLog(stepIndex) {
+  // Bootstrap from URL when stores are empty (page reload scenario)
+  $effect(() => {
+    const urlUuid = $pipelineUUIDFromUrl;
+    if (!$activeProject || !urlUuid || bootstrapped) return;
+    if ($selectedSteps.length > 0) return; // already have steps, main effect will handle
+    bootstrapped = true;
+    bootstrapFromUrl(urlUuid);
+  });
+
+  async function bootstrapFromUrl(uuid) {
+    logState = 'loading';
+    try {
+      const data = await getPipeline($activeProject.id, uuid);
+      const pipelineData = data.pipeline || data;
+      const stepsData = data.steps || [];
+      selectedPipeline.set(pipelineData);
+      selectedSteps.set(stepsData);
+      // The reactive $effect below will now pick up the URL stepNum and load the log
+      await tick();
+    } catch (e) {
+      logState = 'error';
+      logError = e.message;
+      showError(e.message);
+    }
+  }
+
+  async function loadLog(stepIndex, opts = {}) {
     if (!$activeProject || !$selectedPipeline?.uuid || !$selectedSteps[stepIndex]) return;
     const step = $selectedSteps[stepIndex];
     const requestId = ++latestRequestId;
-    logState = 'loading'; logError = '';
+    // Only show loading state on initial load, not on background refreshes
+    if (!opts.silent) { logState = 'loading'; logError = ''; }
     try {
       const data = await getStepLog($activeProject.id, $selectedPipeline.uuid, step.uuid);
       if (requestId !== latestRequestId) return;
@@ -127,9 +155,14 @@
       if (autoScroll && logViewerEl) logViewerEl.scrollTop = logViewerEl.scrollHeight;
     } catch (e) {
       if (requestId !== latestRequestId) return;
-      logError = e.message;
-      logState = 'error';
-      consecutiveErrorCount++;
+      // On silent refresh, don't show error state unless we've exceeded the threshold
+      if (opts.silent && logState === 'ready') {
+        consecutiveErrorCount++;
+      } else {
+        logError = e.message;
+        logState = 'error';
+        consecutiveErrorCount++;
+      }
     }
   }
 
@@ -143,7 +176,7 @@
       elapsedInterval = setInterval(updateElapsed, 1000);
       autoRefreshInterval = setInterval(() => {
         if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) { stopAutoRefresh(); return; }
-        if (logState !== 'loading') loadLog(stepIndex);
+        if (logState !== 'loading') loadLog(stepIndex, { silent: true });
       }, 5000);
     }
   }
