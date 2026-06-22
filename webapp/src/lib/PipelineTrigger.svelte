@@ -1,6 +1,6 @@
 <script>
   import { get } from 'svelte/store';
-  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, triggerPreTarget, triggerPreSelector, triggerPreVars, showError, showSuccess } from '../stores/appState.js';
+  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, triggerPreTarget, triggerPreSelector, triggerPreVars, showError, showSuccess, refreshTrigger } from '../stores/appState.js';
   import { navigateTo } from '../stores/router.js';
   import { triggerPipeline } from '../stores/api.js';
 
@@ -61,6 +61,7 @@
         selector
       );
       showSuccess(`Pipeline #${result.build_number || 'new'} started`);
+      refreshTrigger.update(n => n + 1);
       navigateTo('list');
     } catch (e) {
       showError(e.message);

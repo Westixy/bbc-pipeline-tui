@@ -1,8 +1,9 @@
 <script>
   import { onDestroy, tick } from 'svelte';
-  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
+  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, logContent, logStepName, logStepUUID, showError, showSuccess, refreshTrigger, triggerPreTarget, triggerPreSelector, triggerPreVars } from '../stores/appState.js';
   import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
-  import { getStepLog, getPipeline, listVariables, getLogVariables } from '../stores/api.js';
+  import { getStepLog, getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
+  import ConfirmModal from './ConfirmModal.svelte';
   import { resolveStepStatus, formatDate, formatDuration } from './utils.js';
 
   let logState = $state('idle');
@@ -418,8 +419,42 @@
   });
 
   let isRunning = $derived(resolveStepStatus(currentStep?.state) === 'IN_PROGRESS' || resolveStepStatus(currentStep?.state) === 'PENDING');
+  let pipelineRunning = $derived($selectedPipeline?.state?.name === 'IN_PROGRESS' || $selectedPipeline?.state?.name === 'PENDING' || $selectedPipeline?.state?.name === 'IN_PROGRESS_STOPPING');
   let hasPrev = $derived(currentStepIndex > 0);
   let hasNext = $derived(currentStepIndex >= 0 && currentStepIndex < $selectedSteps.length - 1);
+
+  let showStopConfirm = $state(false);
+  let stopping = $state(false);
+
+  function handleRun() {
+    if (!$activeProject || !$selectedPipeline) return;
+    const target = $selectedPipeline.target?.ref_name || $selectedPipeline.target?.type;
+    if (!target) { showError('No target branch found on this pipeline'); return; }
+    const variables = ($selectedLogVariables || []).map(v => ({ key: v.key, value: v.value }));
+    const selector = $selectedPipeline.target?.selector || null;
+    triggerPreTarget.set(target);
+    triggerPreSelector.set(selector);
+    triggerPreVars.set(variables);
+    navigateTo('trigger');
+  }
+
+  function handleStop() {
+    if (!$activeProject || !$selectedPipeline?.uuid) return;
+    showStopConfirm = true;
+  }
+
+  async function confirmStop() {
+    showStopConfirm = false;
+    stopping = true;
+    try {
+      await stopPipeline($activeProject.id, $selectedPipeline.uuid);
+      showSuccess('Pipeline stopped');
+      // Refresh pipeline state and log after stopping
+      await refreshPipelineAndSteps(currentStepIndex);
+      if (logState !== 'loading') loadLog(currentStepIndex, { silent: true });
+    } catch (e) { showError(e.message); }
+    finally { stopping = false; }
+  }
 
   function closeDropdownOnOutside(e) {
     if (stepDropdownOpen && !e.target.closest('.step-dropdown-wrapper')) stepDropdownOpen = false;
@@ -498,6 +533,16 @@
         {#if isRunning && elapsed}
           <span class="elapsed-counter">{elapsed}</span>
         {/if}
+
+        {#if pipelineRunning}
+          <button class="btn btn-danger btn-sm" onclick={handleStop} disabled={stopping}>
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        {/if}
+        <button class="btn btn-primary btn-sm" onclick={handleRun}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Re-run
+        </button>
 
         <button class="btn btn-ghost btn-icon" class:btn-active={wrapLines} onclick={() => (wrapLines = !wrapLines)} title="Toggle word wrap">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -798,6 +843,15 @@
     </div>
   {/if}
 </div>
+
+<ConfirmModal
+  open={showStopConfirm}
+  onconfirm={confirmStop}
+  oncancel={() => (showStopConfirm = false)}
+  title="Stop Pipeline"
+  message="Are you sure you want to stop pipeline #{$selectedPipeline?.build_number || '—'}? This action cannot be undone."
+  confirmText="Stop Pipeline"
+/>
 
 <style>
   .log-page {
