@@ -1,10 +1,14 @@
 <script>
   import { get } from 'svelte/store';
   import { onDestroy } from 'svelte';
-  import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
+  import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
   import { page, navigateTo } from '../stores/router.js';
   import { listPipelines, getLogVariables, getPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, statusLabel } from './utils.js';
+
+  // ── Fetch token: guards against stale async completions overwriting
+  //     data after a project switch (race condition).
+  let fetchToken = 0;
 
   let root = $state(null);
   let loading = $state(false);
@@ -42,6 +46,7 @@
   /** Load the first page of pipelines, fully replacing the list. */
   async function loadPipelinesFirst() {
     if (!$activeProject) return;
+    const token = ++fetchToken;
     loading = true;
     listState.set('loading');
     listError.set('');
@@ -53,22 +58,27 @@
         sort: get(listSort),
         page: 1,
       });
+      if (fetchToken !== token) return; // Stale fetch — project changed
       pipelines.set(data.values || []);
       pipelinesNext.set(data.next || '');
       hasMore = !!(data.next);
       listState.set('ready');
     } catch (e) {
+      if (fetchToken !== token) return;
       listError.set(e.message);
       listState.set('error');
     } finally {
-      loading = false;
-      loadingMore = false;
+      if (fetchToken === token) {
+        loading = false;
+        loadingMore = false;
+      }
     }
   }
 
   /** Load the next page and append results (infinite scroll). */
   async function loadPipelinesNext() {
     if (!$activeProject || !hasMore || loadingMore) return;
+    const token = ++fetchToken;
     loadingMore = true;
     const nextPage = currentPage + 1;
     try {
@@ -76,6 +86,7 @@
         sort: get(listSort),
         page: nextPage,
       });
+      if (fetchToken !== token) return; // Stale fetch — project changed
       pipelines.update(existing => [...existing, ...(data.values || [])]);
       pipelinesNext.set(data.next || '');
       hasMore = !!(data.next);
@@ -83,7 +94,7 @@
     } catch (_) {
       // Silently fail on infinite-scroll loads — data stays intact
     } finally {
-      loadingMore = false;
+      if (fetchToken === token) loadingMore = false;
     }
   }
 
@@ -163,30 +174,26 @@
   let lastLoaded = '';
   let selectedIndex = $state(null);
   let gridBody = $state(null);
-  let autoRefreshInterval = $state(null);
-
-  // ── Auto-refresh when running pipelines exist ──────────────────────
-  let hasRunningPipelines = $derived.by(() => {
-    return $pipelines.some(p => {
-      const name = p.state?.name;
-      return name === 'IN_PROGRESS' || name === 'PENDING' || name === 'IN_PROGRESS_STOPPING';
-    });
-  });
+  let autoRefreshInterval = null;
 
   function startAutoRefresh() {
     stopAutoRefresh();
+    const projectId = $activeProject?.id;
+    if (!projectId) return;
     autoRefreshInterval = setInterval(async () => {
-      // Only refresh if still on the list page and project is active
-      if ($page !== 'list' || !$activeProject) {
+      // Only refresh if still on the list page and project has not changed
+      if ($page !== 'list' || !$activeProject || $activeProject.id !== projectId) {
         stopAutoRefresh();
         return;
       }
+      const token = ++fetchToken;
       try {
         // Fetch just the first page to check for state changes and new pipelines
         const data = await listPipelines($activeProject.id, {
           sort: get(listSort),
           page: 1,
         });
+        if (fetchToken !== token) return; // Stale fetch — project changed
         const fresh = data.values || [];
         // Merge: update existing pipelines that match by uuid, prepend new ones
         const existing = $pipelines;
@@ -207,7 +214,6 @@
         }
         pipelines.set(merged);
         pipelinesNext.set(data.next || '');
-        lastRefreshed = new Date();
       } catch (_) {
         // Silently ignore errors during auto-refresh
       }
@@ -221,12 +227,15 @@
     }
   }
 
-  // Start/stop auto-refresh based on running pipelines and page visibility
+  // Start/stop auto-refresh based on page and project only.
+  // The interval runs unconditionally; the callback quickly returns if no
+  // running pipelines exist. This avoids a reactive dependency loop where
+  // auto-refresh modifies $pipelines, the effect sees the change, and
+  // re-runs — causing effect_update_depth_exceeded.
   $effect(() => {
-    if ($page === 'list' && hasRunningPipelines && $activeProject) {
-      if (!autoRefreshInterval) startAutoRefresh();
-    } else {
-      stopAutoRefresh();
+    stopAutoRefresh();
+    if ($page === 'list' && $activeProject) {
+      startAutoRefresh();
     }
   });
 
@@ -238,17 +247,29 @@
   let hoverVarsLoading = $state(false);
   let hoverVarsError = $state('');
   let hoverPos = $state({ x: 0, y: 0 });
-  let hoverTimer = $state(null);
+  let hoverTimer = null;
   let hoverActive = $state(false);
+
+  // Cache log variables per pipeline UUID (never expires within a session).
+  const hoverVarsCache = new Map();
 
   async function fetchHoverVars(pipe) {
     if (!$activeProject || !pipe?.uuid) return;
+    const cached = hoverVarsCache.get(pipe.uuid);
+    if (cached) {
+      hoverVars = cached;
+      hoverVarsLoading = false;
+      hoverVarsError = '';
+      return;
+    }
     hoverVarsLoading = true;
     hoverVarsError = '';
     hoverVars = [];
     try {
       const data = await getLogVariables($activeProject.id, pipe.uuid);
-      hoverVars = data.variables || [];
+      const vars = data.variables || [];
+      hoverVars = vars;
+      hoverVarsCache.set(pipe.uuid, vars);
     } catch (e) {
       hoverVarsError = e.message;
     } finally {

@@ -1,14 +1,15 @@
 <script>
   import { onDestroy, tick } from 'svelte';
-  import { activeProject, selectedPipeline, selectedSteps, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
+  import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, logContent, logStepName, logStepUUID, showError, refreshTrigger } from '../stores/appState.js';
   import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
-  import { getStepLog, getPipeline } from '../stores/api.js';
-  import { resolveStepStatus } from './utils.js';
+  import { getStepLog, getPipeline, listVariables, getLogVariables } from '../stores/api.js';
+  import { resolveStepStatus, formatDate, formatDuration } from './utils.js';
 
   let logState = $state('idle');
   let logError = $state('');
   let currentStepIndex = $state(-1);
-  let autoRefreshInterval = $state(null);
+  let isAutoRefreshing = $state(false);
+  let autoRefreshInterval = null;
   let autoScroll = $state(true);
   let wrapLines = $state(true);
   let searchTerm = $state('');
@@ -17,9 +18,65 @@
   let logViewerEl = $state(null);
   let searchInputEl = $state(null);
   let stepDropdownOpen = $state(false);
-  let elapsedInterval = $state(null);
+  let elapsedInterval = null;
   let elapsed = $state('');
-  let lastRefreshed = $state(null);
+  let lastRefreshedTime = $state(null);
+  let lastRefreshed = null;
+  let copiedHash = $state(false);
+  let varsExpanded = $state(false);
+  let varsTab = $state('log');
+  let varsFilter = $state('');
+  let showAllVars = $state(false);
+  const VARS_PREVIEW_COUNT = 6;
+
+  let hasPipelineVars = $derived($selectedVariables.length > 0);
+  let hasLogVars = $derived($selectedLogVariables.length > 0);
+  let hasAnyVars = $derived(hasPipelineVars || hasLogVars);
+
+  let effectiveVarsTab = $derived.by(() => {
+    if (varsTab === 'log' && hasLogVars) return 'log';
+    if (varsTab === 'pipeline' && hasPipelineVars) return 'pipeline';
+    if (hasLogVars) return 'log';
+    if (hasPipelineVars) return 'pipeline';
+    return 'log';
+  });
+  let currentVars = $derived(effectiveVarsTab === 'pipeline' ? $selectedVariables : $selectedLogVariables);
+
+  let filteredVars = $derived.by(() => {
+    const filter = varsFilter.trim().toLowerCase();
+    const vars = currentVars;
+    if (!filter) return vars;
+    return vars.filter(v => v.key.toLowerCase().includes(filter) || (v.value || '').toLowerCase().includes(filter));
+  });
+
+  let displayedVars = $derived(showAllVars ? filteredVars : filteredVars.slice(0, VARS_PREVIEW_COUNT));
+  let hasMoreVars = $derived(filteredVars.length > VARS_PREVIEW_COUNT && !showAllVars);
+
+  // Cache variables per pipeline UUID to avoid re-fetching on every auto-refresh cycle.
+  const varsCache = new Map();
+
+  async function fetchVariables(projectId, pipelineUuid) {
+    try {
+      const cached = varsCache.get(pipelineUuid);
+      if (cached) {
+        selectedVariables.set(cached.pipelineVars);
+        selectedLogVariables.set(cached.logVars);
+        return;
+      }
+      const [varsResp, logVarsResp] = await Promise.all([
+        listVariables(projectId).catch(() => ({ variables: [] })),
+        getLogVariables(projectId, pipelineUuid).catch(() => ({ variables: [] })),
+      ]);
+      const pipelineVars = varsResp.variables || [];
+      const logVars = logVarsResp.variables || [];
+      selectedVariables.set(pipelineVars);
+      selectedLogVariables.set(logVars);
+      // Cache only if we got at least one non-empty result
+      if (pipelineVars.length > 0 || logVars.length > 0) {
+        varsCache.set(pipelineUuid, { pipelineVars, logVars });
+      }
+    } catch (_) {}
+  }
 
   function updateElapsed() {
     const step = $selectedSteps[currentStepIndex];
@@ -130,7 +187,7 @@
       const stepsData = data.steps || [];
       selectedPipeline.set(pipelineData);
       selectedSteps.set(stepsData);
-      // The reactive $effect below will now pick up the URL stepNum and load the log
+      fetchVariables($activeProject.id, uuid);
       await tick();
     } catch (e) {
       logState = 'error';
@@ -154,6 +211,7 @@
       currentStepIndex = stepIndex;
       logState = 'ready';
       lastRefreshed = new Date();
+      lastRefreshedTime = lastRefreshed;
       consecutiveErrorCount = 0;
       updateElapsed();
       await tick();
@@ -178,7 +236,6 @@
 
   async function refreshPipelineAndSteps(stepIndex) {
     if (!$activeProject || !$selectedPipeline?.uuid) return;
-    // Don't overlap refreshes
     if (refreshingPipelineState) return;
     refreshingPipelineState = true;
     try {
@@ -189,9 +246,8 @@
         const pipelineData = data.pipeline || data;
         if (pipelineData) selectedPipeline.set(pipelineData);
       }
-    } catch (_) {
-      // silently ignore
-    } finally {
+      fetchVariables($activeProject.id, $selectedPipeline.uuid);
+    } catch (_) {} finally {
       refreshingPipelineState = false;
     }
   }
@@ -215,6 +271,7 @@
     const sname = step.state?.name;
     if (sname === 'IN_PROGRESS' || sname === 'PENDING') {
       elapsedInterval = setInterval(updateElapsed, 1000);
+      isAutoRefreshing = true;
       autoRefreshInterval = setInterval(async () => {
         if (consecutiveErrorCount >= MAX_CONSECUTIVE_ERRORS) { stopAutoRefresh(); return; }
 
@@ -250,6 +307,7 @@
 
   function stopAutoRefresh() {
     if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
+    isAutoRefreshing = false;
     if (elapsedInterval) { clearInterval(elapsedInterval); elapsedInterval = null; }
   }
 
@@ -366,6 +424,19 @@
   function closeDropdownOnOutside(e) {
     if (stepDropdownOpen && !e.target.closest('.step-dropdown-wrapper')) stepDropdownOpen = false;
   }
+
+  async function copyCommitHash() {
+    const hash = $selectedPipeline?.target?.commit?.hash;
+    if (!hash) return;
+    try { await navigator.clipboard.writeText(hash); }
+    catch {
+      const ta = document.createElement('textarea'); ta.value = hash;
+      ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    }
+    copiedHash = true;
+    setTimeout(() => (copiedHash = false), 2000);
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} onclick={closeDropdownOnOutside} />
@@ -418,7 +489,7 @@
       <div class="log-header-spacer"></div>
 
       <div class="log-header-actions">
-        {#if autoRefreshInterval}
+        {#if isAutoRefreshing}
           <span class="live-indicator">
             <span class="live-dot"></span>
             Live
@@ -473,6 +544,61 @@
     </div>
   </div>
 
+  <!-- Pipeline Info Strip ──────────────────────────────── -->
+  {#if $selectedPipeline}
+    <div class="pipeline-info-strip">
+      <div class="info-field">
+        <span class="info-label">Branch</span>
+        <span class="info-value info-branch">{$selectedPipeline.target?.ref_name || $selectedPipeline.target?.type || '—'}</span>
+      </div>
+      {#if $selectedPipeline.target?.selector}
+        <div class="info-field">
+          <span class="info-label">Pattern</span>
+          <span class="info-value info-pattern">
+            {typeof $selectedPipeline.target.selector === 'object'
+              ? ($selectedPipeline.target.selector.pattern || '—')
+              : $selectedPipeline.target.selector}
+          </span>
+        </div>
+      {/if}
+      <div class="info-field">
+        <span class="info-label">Trigger</span>
+        <span class="info-value">{$selectedPipeline.trigger?.name || '—'}</span>
+      </div>
+      <div class="info-field">
+        <span class="info-label">Creator</span>
+        <span class="info-value">{$selectedPipeline.creator?.display_name || $selectedPipeline.creator?.username || '—'}</span>
+      </div>
+      <div class="info-field">
+        <span class="info-label">Duration</span>
+        <span class="info-value">{formatDuration($selectedPipeline.created_on, $selectedPipeline.completed_on, $selectedPipeline.build_seconds_used || 0)}</span>
+      </div>
+      <div class="info-field">
+        <span class="info-label">Created</span>
+        <span class="info-value">{formatDate($selectedPipeline.created_on)}</span>
+      </div>
+      {#if $selectedPipeline.completed_on}
+        <div class="info-field">
+          <span class="info-label">Completed</span>
+          <span class="info-value">{formatDate($selectedPipeline.completed_on)}</span>
+        </div>
+      {/if}
+      {#if $selectedPipeline.target?.commit?.hash}
+        <div class="info-field">
+          <span class="info-label">Commit</span>
+          <span class="info-value commit-row">
+            <code>{$selectedPipeline.target.commit.hash.substring(0, 8)}</code>
+            <button class="btn btn-ghost btn-icon" onclick={copyCommitHash} title="Copy full commit hash">
+              {#if copiedHash}✓{:else}
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              {/if}
+            </button>
+          </span>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Step Progress Bar ──────────────────────────────────── -->
   <div class="step-progress-bar">
     {#each $selectedSteps as step, i}
@@ -492,6 +618,115 @@
       {/if}
     {/each}
   </div>
+
+  <!-- Variables Section ──────────────────────────────────── -->
+  {#if hasAnyVars}
+    <div class="log-vars-section" class:vars-expanded={varsExpanded}>
+      <div class="log-vars-header">
+        <button class="vars-toggle" onclick={() => (varsExpanded = !varsExpanded)} title={varsExpanded ? 'Collapse variables' : 'Expand variables'}>
+          <svg class="vars-toggle-icon" class:open={varsExpanded} width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <h3 class="log-vars-title">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="12" y1="6" x2="12.01" y2="6"></line><line x1="18" y1="6" x2="18.01" y2="6"></line><line x1="6" y1="12" x2="6.01" y2="12"></line><line x1="12" y1="12" x2="12.01" y2="12"></line><line x1="18" y1="12" x2="18.01" y2="12"></line>
+          </svg>
+          Variables
+        </h3>
+
+        {#if !varsExpanded}
+          <div class="vars-inline-summary">
+            {#each currentVars as v}
+              <span class="vars-inline-pair">
+                <code class="var-key">{v.key}</code>
+                <span class="vars-inline-eq">=</span>
+                <span class="vars-inline-val" class:var-value-masked={v.secured}>
+                  {v.secured ? '••••••••' : (v.value || '(empty)')}
+                </span>
+              </span>
+            {/each}
+          </div>
+        {:else}
+          <div class="vars-tabs-segmented">
+            {#if hasLogVars}
+              <button
+                class="vars-tab-segment"
+                class:active={effectiveVarsTab === 'log'}
+                onclick={() => (varsTab = 'log')}
+              >
+                Log
+                <span class="tab-count">{$selectedLogVariables.length}</span>
+              </button>
+            {/if}
+            {#if hasPipelineVars}
+              <button
+                class="vars-tab-segment"
+                class:active={effectiveVarsTab === 'pipeline'}
+                onclick={() => (varsTab = 'pipeline')}
+              >
+                Pipeline
+                <span class="tab-count">{$selectedVariables.length}</span>
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      {#if varsExpanded}
+        <div class="log-vars-body">
+          {#if effectiveVarsTab === 'log' && hasLogVars}
+            <p class="vars-hint">Parsed from "Pipeline variables:" block in the first step's log.</p>
+          {/if}
+
+          {#if currentVars.length > VARS_PREVIEW_COUNT}
+            <div class="vars-search">
+              <svg class="search-icon-sm" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                class="vars-search-input"
+                placeholder="Filter variables…"
+                bind:value={varsFilter}
+              />
+            </div>
+          {/if}
+
+          {#if filteredVars.length === 0}
+            <p class="empty-text">No variables match <code>{varsFilter}</code></p>
+          {:else}
+            <div class="vars-list">
+              {#each displayedVars as v}
+                <div class="var-row">
+                  <div class="var-row-left">
+                    <code class="var-key">{v.key}</code>
+                    {#if v.secured}
+                      <span class="secured-tag">SECURED</span>
+                    {/if}
+                  </div>
+                  <span class="var-value" class:var-value-masked={v.secured}>
+                    {v.secured ? '••••••••••••••••' : (v.value || '(empty)')}
+                  </span>
+                </div>
+              {/each}
+            </div>
+
+            {#if hasMoreVars}
+              <button class="vars-show-more" onclick={() => (showAllVars = true)}>
+                Show all {filteredVars.length} variables…
+              </button>
+            {/if}
+            {#if showAllVars && filteredVars.length > VARS_PREVIEW_COUNT}
+              <button class="vars-show-more" onclick={() => (showAllVars = false)}>
+                Show fewer
+              </button>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Persistent Search Bar ──────────────────────────────── -->
   <div class="search-bar" class:search-bar--has-term={!!searchTerm}>
@@ -556,8 +791,8 @@
         <span class="log-bottom-auto {autoScroll ? 'on' : 'off'}">
           {autoScroll ? '● Auto-scroll' : '○ Scrolled'}
         </span>
-        {#if lastRefreshed}
-          <span class="log-bottom-refresh">Updated {lastRefreshed.toLocaleTimeString()}</span>
+        {#if lastRefreshedTime}
+          <span class="log-bottom-refresh">Updated {lastRefreshedTime.toLocaleTimeString()}</span>
         {/if}
       </div>
     </div>
@@ -764,6 +999,65 @@
     text-transform: uppercase;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  /* ── Pipeline Info Strip ───────────────────────────────── */
+  .pipeline-info-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-5);
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    min-height: 32px;
+  }
+
+  .info-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+  }
+
+  .info-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+  }
+
+  .info-value {
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .info-branch {
+    font-family: var(--font-mono);
+    color: var(--accent-text);
+  }
+
+  .info-pattern {
+    font-family: var(--font-mono);
+    color: #d2a8ff;
+  }
+
+  .commit-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  .commit-row code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--bg-input);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
   }
 
   /* ── Step Progress Bar ──────────────────────────────────── */
@@ -992,4 +1286,278 @@
   .log-bottom-refresh { margin-left: auto; opacity: 0.6; }
 
   @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── Variables Section ─────────────────────────────────── */
+  .log-vars-section {
+    flex-shrink: 0;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .log-vars-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-5);
+    flex-wrap: wrap;
+    min-height: 32px;
+  }
+
+  /* Collapse/expand toggle */
+  .vars-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+    padding: 0;
+  }
+  .vars-toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .vars-toggle-icon {
+    transition: transform var(--transition-fast);
+    flex-shrink: 0;
+  }
+  .vars-toggle-icon.open {
+    transform: rotate(90deg);
+  }
+
+  /* Inline summary when collapsed */
+  .vars-inline-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    padding: 2px 0;
+  }
+
+  .vars-inline-pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    max-width: 260px;
+    flex-shrink: 0;
+  }
+
+  .vars-inline-eq {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+    padding: 0 1px;
+  }
+
+  .vars-inline-val {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+  }
+  .vars-inline-val.var-value-masked {
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+  }
+
+  .log-vars-section.vars-expanded .vars-inline-summary {
+    display: none;
+  }
+
+  .log-vars-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  .vars-tabs-segmented {
+    display: flex;
+    gap: 0;
+    background: var(--bg-input);
+    border-radius: var(--radius-md);
+    padding: 2px;
+  }
+
+  .vars-tab-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-family: var(--font-ui);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+  }
+  .vars-tab-segment:hover { color: var(--text-primary); }
+  .vars-tab-segment.active {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    font-weight: 600;
+  }
+
+  .tab-count {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--bg-badge);
+    color: var(--text-tertiary);
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+  }
+
+  .log-vars-body {
+    padding: 0 var(--space-5) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .vars-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    font-style: italic;
+    margin: 0;
+    padding: var(--space-1) 0;
+  }
+
+  .vars-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .search-icon-sm {
+    position: absolute;
+    left: 7px;
+    color: var(--text-tertiary);
+    pointer-events: none;
+  }
+
+  .vars-search-input {
+    width: 100%;
+    padding: var(--space-1) var(--space-3) var(--space-1) 26px;
+    font-family: var(--font-ui);
+    font-size: var(--font-size-xs);
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    outline: none;
+  }
+  .vars-search-input:focus { border-color: var(--border-focus); }
+  .vars-search-input::placeholder { color: var(--text-tertiary); }
+
+  .vars-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .var-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+    transition: background var(--transition-fast);
+  }
+  .var-row:hover { background: var(--bg-hover); }
+
+  .var-row-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .var-key {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--accent-text);
+    background: var(--accent-muted);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  .secured-tag {
+    font-size: 9px;
+    color: var(--warning);
+    background: var(--warning-bg);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+
+  .var-value {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-primary);
+    word-break: break-all;
+    line-height: 1.5;
+    padding-left: var(--space-2);
+  }
+
+  .var-value-masked {
+    color: var(--text-tertiary);
+    letter-spacing: 0.15em;
+  }
+
+  .vars-show-more {
+    display: block;
+    width: 100%;
+    padding: var(--space-2);
+    border: 1px dashed var(--border-default);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--accent-text);
+    font-family: var(--font-ui);
+    font-size: var(--font-size-xs);
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: all var(--transition-fast);
+  }
+  .vars-show-more:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-text);
+    color: var(--accent-text);
+  }
 </style>
