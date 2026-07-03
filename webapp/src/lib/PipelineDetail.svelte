@@ -582,8 +582,8 @@
               <div class="col-actions">LOG</div>
             </div>
             <div class="steps-body">
-              {#each $selectedSteps as step, i}
-                {@const effStatus = effectiveStepStatus(step.state, i)}
+              {#each $selectedSteps as step, stepIdx (step.uuid)}
+                {@const effStatus = effectiveStepStatus(step.state, stepIdx)}
                 <div
                   class="step-row"
                   class:step-row-active={effStatus === 'IN_PROGRESS'}
@@ -591,13 +591,13 @@
                   class:step-row-skipped={effStatus === 'SKIPPED'}
                 >
                   <div class="col-dot">
-                    <span class="step-dot {stepDotClass(step.state, i)}"></span>
+                    <span class="step-dot {stepDotClass(step.state, stepIdx)}"></span>
                   </div>
                   <div class="col-name" title={step.name}>
-                    <span class="step-name-text">{step.name || `Step ${i + 1}`}</span>
+                    <span class="step-name-text">{step.name || `Step ${stepIdx + 1}`}</span>
                   </div>
                   <div class="col-status">
-                    <span class="badge {stepStatusBadgeClass(step.state, i)} step-badge">
+                    <span class="badge {stepStatusBadgeClass(step.state, stepIdx)} step-badge">
                       {effStatus === 'SKIPPED' ? 'skipped' : statusLabel(step.state)}
                     </span>
                   </div>
@@ -620,9 +620,9 @@
                       <button
                         class="btn btn-secondary btn-xs"
                         onclick={() => {
-                          logStepName.set(step.name || `Step ${i + 1}`);
+                          logStepName.set(step.name || `Step ${stepIdx + 1}`);
                           logStepUUID.set(step.uuid);
-                          navigateTo('logs', $selectedPipeline.uuid, i);
+                          navigateTo('logs', $selectedPipeline.uuid, stepIdx);
                         }}
                       >
                         Log

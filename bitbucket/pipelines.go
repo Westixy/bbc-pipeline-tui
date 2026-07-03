@@ -72,10 +72,10 @@ func (c *Client) GetPipeline(workspace, repoSlug, pipelineUUID string) (*Pipelin
 
 // ListPipelineSteps fetches all steps for a given pipeline.
 func (c *Client) ListPipelineSteps(workspace, repoSlug, pipelineUUID string) (*PaginatedSteps, error) {
-	path := BuildPipelinePath(workspace, repoSlug, "pipelines/"+url.PathEscape(pipelineUUID)+"/steps")
+	path := BuildPipelinePath(workspace, repoSlug, "pipelines/"+url.PathEscape(pipelineUUID)+"/steps") + "?pagelen=100"
 	var result PaginatedSteps
 	if err := c.doGet(path, &result); err != nil {
-		return nil, fmt.Errorf("list steps: %w", err)
+		return nil, fmt.Errorf("list pipeline steps: %w", err)
 	}
 	return &result, nil
 }
