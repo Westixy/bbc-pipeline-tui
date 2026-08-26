@@ -56,6 +56,7 @@ func (s *Server) registerRoutes() {
 	// Project-specific operations (scoped by project index)
 	s.mux.HandleFunc("GET /api/projects/{id}/pipelines", s.handleListPipelines)
 	s.mux.HandleFunc("GET /api/projects/{id}/pipelines/{uuid}", s.handleGetPipeline)
+	s.mux.HandleFunc("GET /api/projects/{id}/pipeline-by-build", s.handleGetPipelineByBuildNumber)
 	s.mux.HandleFunc("POST /api/projects/{id}/pipelines", s.handleTriggerPipeline)
 	s.mux.HandleFunc("POST /api/projects/{id}/pipelines/{uuid}/stop", s.handleStopPipeline)
 	s.mux.HandleFunc("GET /api/projects/{id}/pipelines/{uuid}/steps", s.handleListSteps)
@@ -299,6 +300,39 @@ func (s *Server) handleGetPipeline(w http.ResponseWriter, r *http.Request) {
 		"steps":    steps,
 	}
 	writeJSON(w, 200, response)
+}
+
+// handleGetPipelineByBuildNumber resolves a pipeline from its build number
+// (supplied via the ?build_number= query parameter) and returns it (plus its
+// steps) in the same shape as handleGetPipeline.
+func (s *Server) handleGetPipelineByBuildNumber(w http.ResponseWriter, r *http.Request) {
+	project, _, err := s.projectByID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	buildNumber, err := strconv.Atoi(r.URL.Query().Get("build_number"))
+	if err != nil {
+		writeError(w, &apiError{Code: 400, Message: "invalid build number"})
+		return
+	}
+
+	pipeline, err := s.client.GetPipelineByBuildNumber(project.Workspace, project.RepoSlug, buildNumber)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	steps := []bitbucket.PipelineStep{}
+	stepsResult, err := s.client.ListPipelineSteps(project.Workspace, project.RepoSlug, pipeline.UUID)
+	if err == nil {
+		steps = stepsResult.Values
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"pipeline": pipeline,
+		"steps":    steps,
+	})
 }
 
 func (s *Server) handleListSteps(w http.ResponseWriter, r *http.Request) {

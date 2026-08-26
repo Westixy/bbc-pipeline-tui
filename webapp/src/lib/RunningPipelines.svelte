@@ -108,7 +108,7 @@
     // without switching the active project in the current tab.
     if (isNewTabClick(e)) {
       e.preventDefault();
-      openInNewTab('detail', item.pipeline.uuid, undefined, {
+      openInNewTab('detail', item.pipeline.build_number, undefined, {
         workspace: item.workspace,
         repo_slug: item.repo_slug,
       });
@@ -119,7 +119,7 @@
     activeProjectId.set(item.project_id);
     // Navigate before setting stores (matches PipelineList.viewDetail) so
     // PipelineDetail's cleanup $effect doesn't clear the pipeline we just set.
-    navigateTo('detail', item.pipeline.uuid);
+    navigateTo('detail', item.pipeline.build_number);
     selectedPipeline.set(item.pipeline);
     selectedSteps.set([]);
     selectedVariables.set([]);

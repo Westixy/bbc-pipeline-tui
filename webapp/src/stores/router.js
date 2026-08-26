@@ -8,59 +8,59 @@ import { activeProject, selectedPipeline } from './appState.js';
  *   #/manage                                           – Manage projects
  *   #/running                                          – Running pipelines across all projects
  *   #/bbc/<workspace>/<repoSlug>                       – Pipeline list
- *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>         – Pipeline detail
- *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>/logs/<stepNum> – Step log viewer
+ *   #/bbc/<workspace>/<repoSlug>/<buildNumber>          – Pipeline detail
+ *   #/bbc/<workspace>/<repoSlug>/<buildNumber>/logs/<stepNum> – Step log viewer
  *   #/bbc/<workspace>/<repoSlug>/trigger               – Trigger pipeline form
  */
 
 /**
- * Parse the current hash into { page, workspace, repoSlug, pipelineUUID, stepNum }.
+ * Parse the current hash into { page, workspace, repoSlug, buildNumber, stepNum }.
  */
 function parseHash() {
   const hash = window.location.hash;
   // #/manage
   if (hash === '#/manage') {
-    return { page: 'manage', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+    return { page: 'manage', workspace: null, repoSlug: null, buildNumber: null, stepNum: null };
   }
 
   // #/running
   if (hash === '#/running') {
-    return { page: 'running', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+    return { page: 'running', workspace: null, repoSlug: null, buildNumber: null, stepNum: null };
   }
 
   // #/bbc/workspace/repoSlug/...
   const bbcMatch = hash.match(/^#\/bbc\/([^/]+)\/([^/]+)(?:\/(.*))?$/);
-  if (!bbcMatch) return { page: '', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+  if (!bbcMatch) return { page: '', workspace: null, repoSlug: null, buildNumber: null, stepNum: null };
 
   const workspace = decodeURIComponent(bbcMatch[1]);
   const repoSlug = decodeURIComponent(bbcMatch[2]);
   const rest = bbcMatch[3] || '';
 
   if (!rest) {
-    return { page: 'list', workspace, repoSlug, pipelineUUID: null, stepNum: null };
+    return { page: 'list', workspace, repoSlug, buildNumber: null, stepNum: null };
   }
 
   // Check for trigger
   if (rest === 'trigger') {
-    return { page: 'trigger', workspace, repoSlug, pipelineUUID: null, stepNum: null };
+    return { page: 'trigger', workspace, repoSlug, buildNumber: null, stepNum: null };
   }
 
-  // Rest could be: pipelineUUID or pipelineUUID/logs/stepNum
+  // Rest could be: buildNumber or buildNumber/logs/stepNum
   const parts = rest.split('/');
-  const pipelineUUID = parts[0] || null;
+  const buildNumber = parts[0] || null;
 
   if (parts.length === 1) {
-    return { page: 'detail', workspace, repoSlug, pipelineUUID, stepNum: null };
+    return { page: 'detail', workspace, repoSlug, buildNumber, stepNum: null };
   }
 
   if (parts.length >= 3 && parts[1] === 'logs') {
     const stepNum = parseInt(parts[2], 10);
     if (!isNaN(stepNum) && stepNum >= 0) {
-      return { page: 'logs', workspace, repoSlug, pipelineUUID, stepNum };
+      return { page: 'logs', workspace, repoSlug, buildNumber, stepNum };
     }
   }
 
-  return { page: '', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+  return { page: '', workspace: null, repoSlug: null, buildNumber: null, stepNum: null };
 }
 
 /**
@@ -70,14 +70,14 @@ function parseHash() {
  *   resolveHash('manage')
  *   resolveHash('running')
  *   resolveHash('list')
- *   resolveHash('detail', pipelineUUID)
- *   resolveHash('logs', pipelineUUID, stepNum)
+ *   resolveHash('detail', buildNumber)
+ *   resolveHash('logs', buildNumber, stepNum)
  *   resolveHash('trigger')
  *
  * Workspace and repoSlug are pulled from the activeProject store unless an
  * explicit `project` ({ workspace, repo_slug }) override is provided.
  */
-export function resolveHash(page, pipelineUUID, stepNum, project) {
+export function resolveHash(page, buildNumber, stepNum, project) {
   if (page === 'manage') return '#/manage';
   if (page === 'running') return '#/running';
 
@@ -92,13 +92,13 @@ export function resolveHash(page, pipelineUUID, stepNum, project) {
   if (page === 'list') return `#/bbc/${ws}/${rs}`;
   if (page === 'trigger') return `#/bbc/${ws}/${rs}/trigger`;
   if (page === 'detail') {
-    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
-    return puuid ? `#/bbc/${ws}/${rs}/${puuid}` : `#/bbc/${ws}/${rs}`;
+    const bnum = buildNumber !== undefined && buildNumber !== null ? buildNumber : (get(selectedPipeline)?.build_number ?? '');
+    return bnum !== '' && bnum !== undefined ? `#/bbc/${ws}/${rs}/${bnum}` : `#/bbc/${ws}/${rs}`;
   }
   if (page === 'logs') {
-    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
+    const bnum = buildNumber !== undefined && buildNumber !== null ? buildNumber : (get(selectedPipeline)?.build_number ?? '');
     const sn = stepNum !== undefined ? stepNum : 0;
-    return puuid ? `#/bbc/${ws}/${rs}/${puuid}/logs/${sn}` : `#/bbc/${ws}/${rs}`;
+    return bnum !== '' && bnum !== undefined ? `#/bbc/${ws}/${rs}/${bnum}/logs/${sn}` : `#/bbc/${ws}/${rs}`;
   }
   return null;
 }
@@ -108,20 +108,20 @@ export function resolveHash(page, pipelineUUID, stepNum, project) {
  *   navigateTo('manage')
  *   navigateTo('running')
  *   navigateTo('list')
- *   navigateTo('detail', pipelineUUID)
- *   navigateTo('logs', pipelineUUID, stepNum)
+ *   navigateTo('detail', buildNumber)
+ *   navigateTo('logs', buildNumber, stepNum)
  *   navigateTo('trigger')
  */
-export function navigateTo(page, pipelineUUID, stepNum) {
-  const hash = resolveHash(page, pipelineUUID, stepNum);
+export function navigateTo(page, buildNumber, stepNum) {
+  const hash = resolveHash(page, buildNumber, stepNum);
   if (hash) window.location.hash = hash;
 }
 
 /**
  * Open the target in a new browser tab.
  */
-export function openInNewTab(page, pipelineUUID, stepNum, project) {
-  const hash = resolveHash(page, pipelineUUID, stepNum, project);
+export function openInNewTab(page, buildNumber, stepNum, project) {
+  const hash = resolveHash(page, buildNumber, stepNum, project);
   if (!hash) return;
   const base = window.location.href.split('#')[0];
   window.open(base + hash, '_blank', 'noopener');
@@ -142,13 +142,13 @@ export function isNewTabClick(event) {
  * place. Use this for simple handlers where no pre-navigation setup (e.g.
  * switching the active project or prefilling stores) is required.
  */
-export function navigateFromClick(event, page, pipelineUUID, stepNum, project) {
+export function navigateFromClick(event, page, buildNumber, stepNum, project) {
   if (isNewTabClick(event)) {
     event.preventDefault();
-    openInNewTab(page, pipelineUUID, stepNum, project);
+    openInNewTab(page, buildNumber, stepNum, project);
     return true;
   }
-  navigateTo(page, pipelineUUID, stepNum);
+  navigateTo(page, buildNumber, stepNum);
   return false;
 }
 
@@ -172,8 +172,8 @@ export const repoSlugFromUrl = readable(parseHash().repoSlug, (set) => {
   return () => window.removeEventListener('hashchange', handler);
 });
 
-export const pipelineUUIDFromUrl = readable(parseHash().pipelineUUID, (set) => {
-  const handler = () => set(parseHash().pipelineUUID);
+export const buildNumberFromUrl = readable(parseHash().buildNumber, (set) => {
+  const handler = () => set(parseHash().buildNumber);
   window.addEventListener('hashchange', handler);
   return () => window.removeEventListener('hashchange', handler);
 });

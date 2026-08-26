@@ -1,8 +1,8 @@
 <script>
   import { onDestroy, tick } from 'svelte';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, logContent, logStepName, logStepUUID, showError, showSuccess, refreshTrigger, triggerPreTarget, triggerPreSelector, triggerPreVars } from '../stores/appState.js';
-  import { navigateTo, navigateFromClick, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
-  import { getStepLog, getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
+  import { navigateTo, navigateFromClick, stepNumFromUrl, buildNumberFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
+  import { getStepLog, getPipeline, getPipelineByBuildNumber, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import ConfirmModal from './ConfirmModal.svelte';
   import { resolveStepStatus, formatDate, formatDuration } from './utils.js';
 
@@ -169,26 +169,26 @@
 
   // Bootstrap from URL when stores are empty (page reload scenario)
   $effect(() => {
-    const urlUuid = $pipelineUUIDFromUrl;
-    if (!$activeProject || !urlUuid || bootstrapped) return;
+    const urlBuild = $buildNumberFromUrl;
+    if (!$activeProject || !urlBuild || bootstrapped) return;
     if ($selectedSteps.length > 0) return; // already have steps, main effect will handle
     // Wait until the activeProject matches the URL workspace/repoSlug
     const urlWs = $workspaceFromUrl;
     const urlRs = $repoSlugFromUrl;
     if ($activeProject.workspace !== urlWs || $activeProject.repo_slug !== urlRs) return;
     bootstrapped = true;
-    bootstrapFromUrl(urlUuid);
+    bootstrapFromUrl(urlBuild);
   });
 
-  async function bootstrapFromUrl(uuid) {
+  async function bootstrapFromUrl(buildNumber) {
     logState = 'loading';
     try {
-      const data = await getPipeline($activeProject.id, uuid);
+      const data = await getPipelineByBuildNumber($activeProject.id, buildNumber);
       const pipelineData = data.pipeline || data;
       const stepsData = data.steps || [];
       selectedPipeline.set(pipelineData);
       selectedSteps.set(stepsData);
-      fetchVariables($activeProject.id, uuid);
+      if (pipelineData?.uuid) fetchVariables($activeProject.id, pipelineData.uuid);
       await tick();
     } catch (e) {
       logState = 'error';
@@ -292,7 +292,7 @@
             // Navigate to next running step
             await loadLog(nextIdx);
             startAutoRefresh(nextIdx);
-            navigateTo('logs', $selectedPipeline?.uuid, nextIdx);
+            navigateTo('logs', $selectedPipeline?.build_number, nextIdx);
           } else {
             // No more running steps — stop refreshing
             stopAutoRefresh();
@@ -316,7 +316,7 @@
     if (i < 0 || i >= $selectedSteps.length) return;
     loadLog(i);
     startAutoRefresh(i);
-    navigateTo('logs', $selectedPipeline?.uuid, i);
+    navigateTo('logs', $selectedPipeline?.build_number, i);
     stepDropdownOpen = false;
   }
 
@@ -357,7 +357,7 @@
     if (e.key === 'Escape') {
       if (searchTerm) { clearSearch(); e.preventDefault(); }
       else if (stepDropdownOpen) { stepDropdownOpen = false; e.preventDefault(); }
-      else { navigateTo('detail', $selectedPipeline?.uuid); }
+      else { navigateTo('detail', $selectedPipeline?.build_number); }
       return;
     }
   }
@@ -481,7 +481,7 @@
   <div class="log-sticky-header">
     <div class="log-header-row">
       <div class="log-header-left">
-        <button class="btn btn-ghost btn-sm" onclick={(e) => navigateFromClick(e, 'detail', $selectedPipeline?.uuid)}>
+        <button class="btn btn-ghost btn-sm" onclick={(e) => navigateFromClick(e, 'detail', $selectedPipeline?.build_number)}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
           </svg>

@@ -70,6 +70,33 @@ func (c *Client) GetPipeline(workspace, repoSlug, pipelineUUID string) (*Pipelin
 	return &result, nil
 }
 
+// GetPipelineByBuildNumber fetches a pipeline by its build number. Bitbucket
+// has no direct "get by build number" endpoint, so this scans the repository's
+// pipelines (newest first) until a matching build number is found.
+func (c *Client) GetPipelineByBuildNumber(workspace, repoSlug string, buildNumber int) (*Pipeline, error) {
+	params := &ListPipelinesParams{Pagelen: 100, Sort: "-created_on"}
+	page, err := c.ListPipelines(workspace, repoSlug, params)
+	if err != nil {
+		return nil, fmt.Errorf("get pipeline by build number: %w", err)
+	}
+	for {
+		for i := range page.Values {
+			if page.Values[i].BuildNumber == buildNumber {
+				return &page.Values[i], nil
+			}
+		}
+		if page.Next == "" {
+			break
+		}
+		next, err := c.ListPipelinesNext(page, params)
+		if err != nil {
+			return nil, fmt.Errorf("get pipeline by build number: %w", err)
+		}
+		page = next
+	}
+	return nil, fmt.Errorf("pipeline with build number %d not found", buildNumber)
+}
+
 // ListPipelineSteps fetches all steps for a given pipeline.
 func (c *Client) ListPipelineSteps(workspace, repoSlug, pipelineUUID string) (*PaginatedSteps, error) {
 	path := BuildPipelinePath(workspace, repoSlug, "pipelines/"+url.PathEscape(pipelineUUID)+"/steps") + "?pagelen=100"

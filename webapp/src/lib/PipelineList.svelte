@@ -107,13 +107,13 @@
     // mutating the current tab's state.
     if (isNewTabClick(e)) {
       e.preventDefault();
-      openInNewTab('detail', pipeline.uuid);
+      openInNewTab('detail', pipeline.build_number);
       return;
     }
     // Navigate FIRST so $page changes before we set stores.
     // Otherwise PipelineDetail's cleanup $effect can see $page==='list'
     // and clear the pipeline we just set.
-    navigateTo('detail', pipeline.uuid);
+    navigateTo('detail', pipeline.build_number);
     selectedPipeline.set(pipeline);
     selectedSteps.set([]);
     selectedVariables.set([]);
@@ -160,7 +160,7 @@
     // open the pipeline detail in a new tab as a best-effort fallback.
     if (isNewTabClick(e)) {
       e.preventDefault();
-      openInNewTab('detail', pipeline.uuid);
+      openInNewTab('detail', pipeline.build_number);
       return;
     }
     const pUuid = pipeline.uuid;
@@ -177,7 +177,7 @@
       selectedSteps.set(steps);
       logStepName.set(targetStep.name || `Step ${stepIdx + 1}`);
       logStepUUID.set(targetStep.uuid);
-      navigateTo('logs', pUuid, stepIdx);
+      navigateTo('logs', pipeline.build_number, stepIdx);
     } catch (e) {
       // Silently fail — user can still click through to detail
     } finally {

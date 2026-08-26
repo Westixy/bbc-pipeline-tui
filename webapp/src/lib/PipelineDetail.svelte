@@ -2,8 +2,8 @@
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
-  import { page, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
-  import { getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
+  import { page, buildNumberFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
+  import { getPipeline, getPipelineByBuildNumber, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState, resolveStepStatus } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
 
@@ -240,36 +240,40 @@
 
   // Bootstrap from URL when stores are empty (page reload scenario)
   $effect(() => {
-    const urlUuid = $pipelineUUIDFromUrl;
-    if ($page !== 'detail' || !$activeProject || !urlUuid || bootstrapped) return;
+    const urlBuild = $buildNumberFromUrl;
+    if ($page !== 'detail' || !$activeProject || !urlBuild || bootstrapped) return;
     // Wait until the activeProject matches the URL workspace/repoSlug
     const urlWs = $workspaceFromUrl;
     const urlRs = $repoSlugFromUrl;
     if ($activeProject.workspace !== urlWs || $activeProject.repo_slug !== urlRs) return;
     // Don't double-load if selectedPipeline is already being loaded by the main effect
-    if ($selectedPipeline?.uuid === urlUuid) return;
+    if (String($selectedPipeline?.build_number) === String(urlBuild)) return;
     bootstrapped = true;
-    detailLoadedFor = `${$activeProject.id}-${urlUuid}-${$refreshTrigger}`;
-    loadDetailFromUrl(urlUuid);
+    loadDetailFromUrl(urlBuild);
   });
 
-  async function loadDetailFromUrl(uuid) {
+  async function loadDetailFromUrl(buildNumber) {
     if ($page !== 'detail') return;
     detailState.set('loading');
     try {
-      const [pipeResp, varsResp, logVarsResp] = await Promise.all([
-        getPipeline($activeProject.id, uuid),
-        listVariables($activeProject.id).catch(() => ({ variables: [] })),
-        getLogVariables($activeProject.id, uuid).catch(() => ({ variables: [] })),
-      ]);
+      // Resolve the pipeline from its build number first — this yields the uuid
+      // needed for subsequent variable/log lookups.
+      const pipeResp = await getPipelineByBuildNumber($activeProject.id, buildNumber);
       const pipelineData = pipeResp.pipeline || pipeResp;
       const stepsData = pipeResp.steps || [];
-      const varsData = varsResp.variables || [];
-      const logVarsData = logVarsResp.variables || [];
       selectedPipeline.set(pipelineData);
       selectedSteps.set(stepsData);
-      selectedVariables.set(varsData);
-      selectedLogVariables.set(logVarsData);
+      // Prevent the main effect from re-loading the pipeline we just resolved.
+      lastProjectId = $activeProject.id;
+      detailLoadedFor = `${$activeProject.id}-${pipelineData?.uuid}-${$refreshTrigger}`;
+
+      const uuid = pipelineData?.uuid;
+      const [varsResp, logVarsResp] = await Promise.all([
+        listVariables($activeProject.id).catch(() => ({ variables: [] })),
+        uuid ? getLogVariables($activeProject.id, uuid).catch(() => ({ variables: [] })) : Promise.resolve({ variables: [] }),
+      ]);
+      selectedVariables.set(varsResp.variables || []);
+      selectedLogVariables.set(logVarsResp.variables || []);
       detailState.set('ready');
       lastRefreshed = new Date();
       updateElapsed();
@@ -523,12 +527,12 @@
                   if (step.state?.name !== 'NOT_STARTED') {
                     if (isNewTabClick(e)) {
                       e.preventDefault();
-                      openInNewTab('logs', $selectedPipeline.uuid, i);
+                      openInNewTab('logs', $selectedPipeline.build_number, i);
                       return;
                     }
                     logStepName.set(step.name || `Step ${i + 1}`);
                     logStepUUID.set(step.uuid);
-                    navigateTo('logs', $selectedPipeline.uuid, i);
+                    navigateTo('logs', $selectedPipeline.build_number, i);
                   }
                 }}
                 title={stepNodeTitle(step, i)}
@@ -627,12 +631,12 @@
                         onclick={(e) => {
                           if (isNewTabClick(e)) {
                             e.preventDefault();
-                            openInNewTab('logs', $selectedPipeline.uuid, stepIdx);
+                            openInNewTab('logs', $selectedPipeline.build_number, stepIdx);
                             return;
                           }
                           logStepName.set(step.name || `Step ${stepIdx + 1}`);
                           logStepUUID.set(step.uuid);
-                          navigateTo('logs', $selectedPipeline.uuid, stepIdx);
+                          navigateTo('logs', $selectedPipeline.build_number, stepIdx);
                         }}
                       >
                         Log

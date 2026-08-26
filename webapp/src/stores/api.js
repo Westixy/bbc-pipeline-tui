@@ -55,6 +55,10 @@ export function getPipeline(projectId, uuid) {
   return request(`/projects/${projectId}/pipelines/${cleanUuid(uuid)}`);
 }
 
+export function getPipelineByBuildNumber(projectId, buildNumber) {
+  return request(`/projects/${projectId}/pipeline-by-build?build_number=${encodeURIComponent(buildNumber)}`);
+}
+
 export function listSteps(projectId, pipelineUuid) {
   return request(`/projects/${projectId}/pipelines/${cleanUuid(pipelineUuid)}/steps`);
 }
