@@ -105,8 +105,7 @@ If this fails, start Docker Desktop / the Docker daemon first.
 The app authenticates as *you* using a Bitbucket **app password** (not your
 regular login password).
 
-1. In Bitbucket Cloud, go to **Personal settings → App passwords → Create app
-   password**.
+1. In Bitbucket Cloud, go to [Manage API Token](https://id.atlassian.com/manage-profile/security/api-tokens)
 2. Give it a label (e.g. `infra-pipeline-ui`).
 3. Grant it at least the permissions the tool needs:
    - **Pipelines — Read** (to list pipelines, steps, and logs),
