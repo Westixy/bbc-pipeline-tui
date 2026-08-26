@@ -40,6 +40,9 @@
           vendorHash = "sha256-hipaq95BFUCZhax+kkLGok99+ZMnaODJ2bDdiAVO+9A=";
           ldflags = [ "-s" "-w" ];
 
+          # Build a fully static binary so it runs in a `FROM scratch` container.
+          env.CGO_ENABLED = "0";
+
           preBuild = ''
             # Copy pre-built webapp distribution into the path expected by go:embed
             mkdir -p server/webapp-dist

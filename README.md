@@ -44,7 +44,34 @@ On first run, a setup wizard collects:
 - Bitbucket username and **app password**
 - One or more `workspace/repo_slug` pairs
 
-Config is written to `~/.config/infra-pipeline-ui.yml`.
+Config is written to `~/.config/bbc-pipeline-tui.yml` (override the location with
+the `BBC_CONFIG` environment variable).
+
+## Docker
+
+A `Dockerfile` is included that uses **Nix as the build stage** (producing a
+statically-linked Go binary with the embedded webapp) and a **`scratch` runtime
+image** containing only the binary. The config is expected at `/config.yml`
+inside the container.
+
+Manage the container lifecycle with the helper scripts:
+
+```bash
+./bbc.sh build    # build the image
+./bbc.sh start    # build the image if missing, then run the container (webapp mode)
+./bbc.sh status   # show container state + health check
+./bbc.sh stop     # stop and remove the container
+./bbc.sh restart  # stop then start
+./bbc.sh logs     # follow container logs
+```
+
+Windows: `bbc.bat build|start|stop|restart|status|logs`.
+
+The scripts mount `./config.yml` (host) at `/config.yml` in the container, so
+create that file first (see [Configuration](#configuration)) or point elsewhere
+with `BBC_CONFIG_FILE=/path/to/config.yml`. The webapp is published on
+`http://localhost:8080`; override with `BBC_PORT`, `BBC_IMAGE` or `BBC_CONTAINER`
+as needed.
 
 ## Usage
 
