@@ -1,6 +1,11 @@
 # infra-pipeline-ui
 
-A terminal-based TUI for browsing, inspecting, and triggering Bitbucket Pipelines, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+A faster interface for browsing, inspecting, and triggering Bitbucket Cloud pipelines. It ships **two frontends** backed by a single Go codebase:
+
+- **Terminal UI (TUI)** — built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss). This is the default mode.
+- **Web app** — a [Svelte 5](https://svelte.dev) single-page app served by an embedded Go HTTP server. Selected with the `--webapp` flag.
+
+Both frontends proxy the Bitbucket Cloud REST API v2.0 through the same Go client, authenticating with a Bitbucket **app password** over HTTP Basic Auth. You can list, filter, and inspect pipelines, read step logs, trigger and stop runs, and manage favourite `workspace/repo_slug` projects.
 
 ## Why
 
@@ -24,37 +29,59 @@ pipelines across every project in one place.
 
 ## Features
 
-- **Pipeline list** — browse pipelines across Bitbucket repositories with status/cache-aware loading.
-- **Filtering** — filter by build number, branch name, pipeline type, or status (`/`).
+- **Pipeline list** — browse pipelines across your repositories with status-aware loading.
+- **Filtering & search** — filter by build number, branch, pipeline type, or status; search step logs with match highlighting.
 - **Detail view** — inspect pipeline steps, parsed log variables, and run metadata.
-- **Step logs** — view step output inline with search highlighting.
-- **Trigger runs** — kick off pipeline runs with a custom branch, selector, and runtime variables (add/edit/delete).
-- **Multi-project favourites** — save workspace/repo pairs (`p`) and switch between them (`tab`).
-- **Project manager** (`p`) — two-pane browser to add repos from any workspace or remove favourites.
+- **Step logs** — view step output inline, with ANSI colour rendering and live auto-refresh.
+- **Trigger runs** — start a pipeline with a custom branch, selector, and runtime variables.
+- **Stop runs** — stop an in-progress pipeline.
+- **Running pipelines** — see all running pipelines across every configured project in one place.
+- **Multi-project favourites** — save `workspace/repo_slug` pairs and switch between them.
+- **Project manager** — add repositories from any workspace or remove favourites, with autocomplete.
 - **Config wizard** — interactive first-run setup for Bitbucket credentials and projects.
-- **API cache** — pipelines and repositories are cached locally to reduce API calls.
+
+Every capability is available in both the TUI and the web app; they differ only in how you drive them (keyboard vs. browser).
 
 ## Quick start
+
+### Docker (recommended)
+
+No Go, Node, or Nix needed locally — the image is built inside Docker using Nix.
+
+```bash
+./bbc.sh start     # build the image if needed, then run the webapp
+./bbc.sh status    # confirm it's healthy
+./bbc.sh stop      # shut down
+```
+
+Then open http://localhost:8080. Windows: `bbc.bat start|stop|status`. See [Docker](#docker) and the [User Guide](USERGUIDE.md) for details.
 
 ### Nix
 
 ```bash
-nix run .
+nix run .                                 # run the TUI
+nix run . -- --webapp localhost:8080      # run the webapp
 ```
 
 Or build the binary:
 
 ```bash
 nix build .
-./result/bin/infra-pipeline-ui
+./result/bin/infra-pipeline-ui                          # TUI
+./result/bin/infra-pipeline-ui --webapp localhost:8080  # webapp
 ```
 
 ### Go (dev shell)
 
 ```bash
-nix develop   # or ensure Go + golangci-lint are on PATH
+nix develop   # or ensure Go + Node are on PATH
+
+# Build the webapp frontend first (required for the embedded webapp):
+(cd webapp && npm install && npm run build)
+
 go build -o infra-pipeline-ui .
-./infra-pipeline-ui
+./infra-pipeline-ui                          # TUI
+./infra-pipeline-ui --webapp localhost:8080  # webapp
 ```
 
 ## Configuration
@@ -100,6 +127,8 @@ is published on `http://localhost:8080`; override with `BBC_PORT`, `BBC_IMAGE` o
 
 ## Usage
 
+### TUI keybindings
+
 | Key              | Action                                  |
 | ---------------- | --------------------------------------- |
 | `↑` `↓` / `j` `k` | Navigate list                          |
@@ -130,41 +159,63 @@ is published on `http://localhost:8080`; override with `BBC_PORT`, `BBC_IMAGE` o
 | `r`           | Refresh workspace repo list               |
 | `esc`         | Step back (input → repos → favs → list)   |
 
+### Web app
+
+Open the URL printed on start (default `http://localhost:8080`). For a complete description of the webapp's screens, features, and keyboard shortcuts, see [WEBAPP_GUIDE.md](WEBAPP_GUIDE.md).
+
 ## Project structure
 
 ```
 .
-├── main.go
+├── main.go                   # Entry point: loads config, chooses TUI vs webapp mode
+├── go.mod / go.sum           # Go module (github.com/bbc/infra-pipeline-ui)
+├── flake.nix / flake.lock    # Nix flake: dev shell, package, app
+├── Dockerfile                # Nix build stage → scratch runtime image
+├── bbc.sh / bbc.bat          # Container lifecycle scripts (build/start/stop/…)
 ├── bitbucket/
-│   ├── client.go          # HTTP client, auth, shared types (PipelineVariable, Repository, …)
-│   ├── pipelines.go       # Pipeline/step API methods
-│   └── cache.go           # In-memory cache + rate-limit client wrapper
+│   ├── client.go             # HTTP client, Basic auth, shared types, pagination
+│   ├── pipelines.go          # Pipeline/step/log/variable API methods
+│   ├── repositories.go       # Workspace repository listing
+│   ├── cached_client.go      # CachedClient: in-memory TTL cache wrapper
+│   └── cache.go              # Thread-safe TTL cache implementation
 ├── config/
-│   ├── config.go          # Config file load/save + project helpers
-│   └── wizard.go          # First-run setup wizard
-├── ui/
-│   ├── types.go           # Model struct, screen constants, messages
-│   ├── styles.go          # Lipgloss style definitions
-│   ├── helpers.go         # Utilities (filter, truncate, paginate, width)
-│   ├── commands.go        # Async fetch/trigger tea.Cmd functions
-│   ├── update.go          # NewModel, Init, Update router, global key handlers
-│   ├── view.go            # View router, header, loading, error, content layout
-│   ├── list.go            # Pipeline list update/view
-│   ├── detail.go          # Pipeline detail update/view
-│   ├── logs.go            # Step log view with search
-│   ├── run.go             # Trigger pipeline form update/view
-│   └── manage_projects.go # Two-pane project manager update/view
-├── flake.nix              # Nix flake: dev shell, package, app
-├── Makefile               # Convenience targets (build, test, lint, etc.)
-├── bitbucket.openapi.json # Bitbucket API spec (documentation only)
+│   ├── config.go             # YAML load/save, Project type, validation, helpers
+│   └── wizard.go             # Interactive first-run setup wizard
+├── ui/                       # Bubble Tea TUI
+│   ├── types.go              # Model struct, screen/state constants
+│   ├── update.go             # NewModel, Init, Update router, global key handling
+│   ├── view.go               # View router, header/help/content layout
+│   ├── commands.go           # Async tea.Cmd functions + result messages
+│   ├── helpers.go            # Formatting, filtering, pagination, log-var parsing
+│   ├── styles.go             # Lip Gloss style definitions
+│   ├── list.go               # Pipeline list screen
+│   ├── detail.go             # Pipeline detail screen
+│   ├── logs.go               # Step log viewer (search + auto-refresh)
+│   ├── run.go                # Trigger pipeline form
+│   ├── projects.go           # Project/favourite helpers
+│   └── manage_projects.go    # Project manager screen
+├── server/
+│   └── server.go             # Webapp HTTP server (JSON API + embedded SPA)
+├── webapp/                   # Svelte 5 single-page app
+│   ├── src/                  # Components, stores, styles
+│   └── package.json
+├── test_webapp.sh            # Smoke-test script for the webapp HTTP API
+├── bitbucket.openapi.json    # Bitbucket API 2.0 spec (reference only)
+├── USERGUIDE.md              # Webapp run guide (Docker + bbc.sh)
+├── WEBAPP_GUIDE.md           # Webapp frontend feature guide
 └── README.md
 ```
 
 ## Nix flake
 
-| Command          | Description                              |
-| ---------------- | ---------------------------------------- |
-| `nix develop`    | Enter dev shell with Go + golangci-lint  |
-| `nix build`      | Build release binary                     |
-| `nix run .`      | Build and run the TUI                    |
-| `nix flake check`| Validate the flake                       |
+| Command           | Description                                      |
+| ----------------- | ------------------------------------------------ |
+| `nix develop`     | Enter dev shell with Go, Node, and golangci-lint |
+| `nix build`       | Build release binary                             |
+| `nix run .`       | Build and run the app (TUI mode by default)      |
+| `nix flake check` | Validate the flake                               |
+
+## Documentation
+
+- [USERGUIDE.md](USERGUIDE.md) — how to run the app in webapp mode (Docker + `bbc.sh`, configuration, troubleshooting).
+- [WEBAPP_GUIDE.md](WEBAPP_GUIDE.md) — complete description of the webapp frontend's features.
