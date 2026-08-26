@@ -2,6 +2,26 @@
 
 A terminal-based TUI for browsing, inspecting, and triggering Bitbucket Pipelines, built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+## Why
+
+I built this because the original Bitbucket Pipelines UI was missing some
+features I consider mandatory. Filtering pipeline history is clunky, running a
+pipeline with custom variables requires hunting through confusing menus, and
+there's no quick way to see the status of every pipeline across all your
+repositories at a glance.
+
+What pushed me over the edge was Atlassian's issue tracker: for **years**, open
+tickets for these exact features gathered dozens of upvotes and "me too"
+comments from users asking for the same thing — and nothing happened. The
+tickets just sat there, some of them for the better part of a decade, while the
+community kept asking. I got fed up waiting and decided to build the UI I
+wanted myself.
+
+So this is a faster, keyboard-first interface that does what the official UI
+should have done all along: filter and search pipelines instantly, trigger runs
+with custom branch/selector/variables in a few keystrokes, and view running
+pipelines across every project in one place.
+
 ## Features
 
 - **Pipeline list** — browse pipelines across Bitbucket repositories with status/cache-aware loading.
