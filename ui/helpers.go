@@ -235,6 +235,14 @@ func formatDurationCompact(seconds int) string {
 	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
+// derefInt returns 0 if p is nil, otherwise *p.
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 // formatDurationSeconds formats a duration in seconds to a human-readable string.
 func formatDurationSeconds(seconds int) string {
 	if seconds <= 0 {

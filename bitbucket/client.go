@@ -300,8 +300,10 @@ type PipelineStep struct {
 	Name           string            `json:"name"`
 	// Helper field populated after fetching
 	MaxTime *int `json:"max_time,omitempty"`
-	// Duration in seconds, computed
-	Duration int `json:"duration"`
+	// Duration in seconds (API field)
+	DurationInSeconds       *int `json:"duration_in_seconds,omitempty"`
+	RunDurationInSeconds    *int `json:"run_duration_in_seconds,omitempty"`
+	BuildDurationInSeconds  *int `json:"build_duration_in_seconds,omitempty"`
 }
 
 // PipelineStepState is the state of a pipeline step.
@@ -334,6 +336,7 @@ type ListPipelinesParams struct {
 	Page    int
 	Sort    string // e.g., "-created_on"
 	Fields  string
+	Filter  string // e.g., "target.ref_name=\"main\"" — Bitbucket q parameter
 }
 
 // BuildPipelinePath builds the API path for a workspace/repo resource.

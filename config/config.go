@@ -10,8 +10,8 @@ import (
 
 // Project represents a Bitbucket workspace and repository pair.
 type Project struct {
-	Workspace string `yaml:"workspace"`
-	RepoSlug  string `yaml:"repo_slug"`
+	Workspace string `yaml:"workspace" json:"workspace"`
+	RepoSlug  string `yaml:"repo_slug" json:"repo_slug"`
 }
 
 // Config holds the application configuration.
@@ -22,7 +22,13 @@ type Config struct {
 }
 
 // DefaultPath returns the default config file path.
+//
+// The path can be overridden with the BBC_CONFIG environment variable; this is
+// used by the container image, where the config is mounted at /config.yml.
 func DefaultPath() (string, error) {
+	if env := os.Getenv("BBC_CONFIG"); env != "" {
+		return env, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)

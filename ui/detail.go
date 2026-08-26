@@ -388,7 +388,7 @@ func buildDetailSteps(steps []bitbucket.PipelineStep, cursor int) string {
 		}
 
 		status := resolveStepStatus(s.State)
-		dur := formatDuration(s.StartedOn, s.CompletedOn, s.Duration)
+		dur := formatDuration(s.StartedOn, s.CompletedOn, derefInt(s.DurationInSeconds))
 
 		row := fmt.Sprintf("%s%-3d %-30s %-16s %s",
 			prefix, i+1,
