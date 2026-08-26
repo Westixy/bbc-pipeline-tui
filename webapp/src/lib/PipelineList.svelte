@@ -2,9 +2,9 @@
   import { get } from 'svelte/store';
   import { onDestroy } from 'svelte';
   import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
-  import { page, navigateTo, isNewTabClick, openInNewTab } from '../stores/router.js';
+  import { page, navigateTo, isNewTabClick, isBitbucketClick, openInNewTab } from '../stores/router.js';
   import { listPipelines, getLogVariables, getPipeline } from '../stores/api.js';
-  import { formatDate, formatDuration, statusLabel } from './utils.js';
+  import { formatDate, formatDuration, statusLabel, openBitbucketPipeline } from './utils.js';
 
   // ── Fetch token: guards against stale async completions overwriting
   //     data after a project switch (race condition).
@@ -103,6 +103,12 @@
   }
 
   function viewDetail(e, pipeline) {
+    // Ctrl/Cmd+Alt+click opens the pipeline's Bitbucket URL in a new tab.
+    if (isBitbucketClick(e)) {
+      e.preventDefault();
+      openBitbucketPipeline($activeProject?.workspace, $activeProject?.repo_slug, pipeline.build_number);
+      return;
+    }
     // Ctrl/Cmd/Shift + click (or middle-click) opens in a new tab without
     // mutating the current tab's state.
     if (isNewTabClick(e)) {

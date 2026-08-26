@@ -137,6 +137,15 @@ export function isNewTabClick(event) {
 }
 
 /**
+ * Whether a click should open the item's Bitbucket URL in a new tab:
+ * Ctrl/Cmd + Alt + click.
+ */
+export function isBitbucketClick(event) {
+  if (!event) return false;
+  return (event.ctrlKey || event.metaKey) && event.altKey;
+}
+
+/**
  * Click handler for navigation "links". Honors Ctrl/Cmd/Shift + click and
  * middle-click by opening the target in a new tab instead of navigating in
  * place. Use this for simple handlers where no pre-navigation setup (e.g.

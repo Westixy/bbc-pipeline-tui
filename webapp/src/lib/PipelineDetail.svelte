@@ -4,7 +4,7 @@
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
   import { page, buildNumberFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
   import { getPipeline, getPipelineByBuildNumber, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
-  import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState, resolveStepStatus } from './utils.js';
+  import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState, resolveStepStatus, openBitbucketPipeline } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
 
   let stopping = $state(false);
@@ -398,6 +398,19 @@
         </button>
         <button class="btn btn-secondary btn-sm" onclick={() => { detailLoadedFor = null; loadDetail(); }} title="Refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        </button>
+        <button
+          class="btn btn-secondary btn-sm"
+          onclick={() => openBitbucketPipeline($activeProject?.workspace, $activeProject?.repo_slug, $selectedPipeline?.build_number)}
+          title="View on Bitbucket"
+          disabled={!$activeProject || $selectedPipeline?.build_number === undefined}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+          Bitbucket
         </button>
       </div>
     </div>

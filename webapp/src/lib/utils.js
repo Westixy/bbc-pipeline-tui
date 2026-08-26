@@ -21,6 +21,25 @@ export function formatDate(dateStr) {
   return d.toLocaleString();
 }
 
+/**
+ * Returns the Bitbucket Cloud URL for a pipeline run's results page.
+ */
+export function bitbucketPipelineUrl(workspace, repoSlug, buildNumber) {
+  if (!workspace || !repoSlug || buildNumber === undefined || buildNumber === null) return null;
+  return `https://bitbucket.org/${encodeURIComponent(workspace)}/${encodeURIComponent(repoSlug)}/pipelines/results/${encodeURIComponent(buildNumber)}`;
+}
+
+/**
+ * Opens the Bitbucket Cloud URL for a pipeline run in a new browser tab.
+ * Returns false if the URL can't be constructed.
+ */
+export function openBitbucketPipeline(workspace, repoSlug, buildNumber) {
+  const url = bitbucketPipelineUrl(workspace, repoSlug, buildNumber);
+  if (!url) return false;
+  window.open(url, '_blank', 'noopener');
+  return true;
+}
+
 export function formatDuration(createdOn, completedOn, buildSecondsUsed) {
   // Primary: compute from timestamps (wall-clock time), matching TUI behavior
   if (completedOn) {

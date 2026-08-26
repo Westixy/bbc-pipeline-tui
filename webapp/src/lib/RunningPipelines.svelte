@@ -14,9 +14,9 @@
     detailState,
     showError,
   } from '../stores/appState.js';
-  import { page, navigateTo, isNewTabClick, openInNewTab } from '../stores/router.js';
+  import { page, navigateTo, isNewTabClick, isBitbucketClick, openInNewTab } from '../stores/router.js';
   import { listRunningPipelines, getLogVariables } from '../stores/api.js';
-  import { formatDate, statusLabel } from './utils.js';
+  import { formatDate, statusLabel, openBitbucketPipeline } from './utils.js';
 
   let autoRefresh = $state(false);
   // Auto-refresh interval selector: 'asap' | '1m' | '5m' | 'pause'.
@@ -104,6 +104,12 @@
   }
 
   function openDetail(e, item) {
+    // Ctrl/Cmd+Alt+click opens the pipeline's Bitbucket URL in a new tab.
+    if (isBitbucketClick(e)) {
+      e.preventDefault();
+      openBitbucketPipeline(item.workspace, item.repo_slug, item.pipeline.build_number);
+      return;
+    }
     // Ctrl/Cmd/Shift + click (or middle-click) opens the detail in a new tab
     // without switching the active project in the current tab.
     if (isNewTabClick(e)) {
