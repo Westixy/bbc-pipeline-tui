@@ -38,4 +38,3 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
 EXPOSE 8080
 
 ENTRYPOINT ["/infra-pipeline-ui"]
-CMD ["--webapp", "0.0.0.0:8080"]

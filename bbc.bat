@@ -70,12 +70,81 @@ echo [bbc] Image '%IMAGE_NAME%' built.
 goto :eof
 
 rem ---------------------------------------------------------------------------
-:start
-if not exist "%CONFIG_FILE%" (
-  echo [bbc] Config file not found: %CONFIG_FILE%
-  echo [bbc] Create it first or set BBC_CONFIG_FILE.
-  exit /b 1
+:ensure_config
+if exist "%CONFIG_FILE%" goto :eof
+
+:ensure_config_prompt
+echo.
+echo [bbc] Config file not found: %CONFIG_FILE%
+echo.
+echo   1. Run the first-time setup wizard
+echo   2. Set BBC_CONFIG_FILE to another path
+echo   q. Abort
+echo.
+set "CHOICE="
+set /p "CHOICE=Choose an option [1/2/q]: "
+
+if "%CHOICE%"=="1" (
+  call :run_wizard
+  goto :ensure_config
 )
+if "%CHOICE%"=="2" (
+  call :set_config_path
+  goto :ensure_config
+)
+if /i "%CHOICE%"=="q" goto :abort
+if "%CHOICE%"=="" goto :abort
+
+echo [bbc] Unknown option.
+goto :ensure_config_prompt
+
+:abort
+echo [bbc] Aborted.
+exit /b 1
+
+:set_config_path
+set "NEWPATH="
+set /p "NEWPATH=Config file path: "
+if "%NEWPATH%"=="" (
+  echo [bbc] No path given.
+  goto :eof
+)
+set "CONFIG_FILE=%NEWPATH%"
+goto :eof
+
+:run_wizard
+docker image inspect "%IMAGE_NAME%" >nul 2>nul
+if errorlevel 1 (
+  echo [bbc] Image not found - building it now.
+  call :build
+  if errorlevel 1 exit /b 1
+)
+
+set "CFG_DIR=%~dp0"
+set "CFG_BASE=config.yml"
+for %%F in ("%CONFIG_FILE%") do (
+  if not "%%~dpF"=="" set "CFG_DIR=%%~dpF"
+  set "CFG_BASE=%%~nxF"
+)
+if "%CFG_DIR:~-1%"=="\" set "CFG_DIR=%CFG_DIR:~0,-1%"
+
+echo [bbc] Starting the interactive setup wizard...
+echo [bbc] Config will be written to %CONFIG_FILE%.
+echo [bbc] After the wizard completes, quit the TUI with 'q'.
+
+docker run --rm -it -v "%CFG_DIR%:/cfg" -e "BBC_CONFIG=/cfg/%CFG_BASE%" "%IMAGE_NAME%"
+
+if exist "%CONFIG_FILE%" (
+  echo [bbc] Configuration saved to %CONFIG_FILE%.
+) else (
+  echo [bbc] Wizard finished but %CONFIG_FILE% was not created.
+)
+goto :eof
+
+rem ---------------------------------------------------------------------------
+:start
+call :ensure_config
+if errorlevel 1 exit /b 1
 
 docker image inspect "%IMAGE_NAME%" >nul 2>nul
 if errorlevel 1 (

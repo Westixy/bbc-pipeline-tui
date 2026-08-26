@@ -67,11 +67,12 @@ Manage the container lifecycle with the helper scripts:
 
 Windows: `bbc.bat build|start|stop|restart|status|logs`.
 
-The scripts mount `./config.yml` (host) at `/config.yml` in the container, so
-create that file first (see [Configuration](#configuration)) or point elsewhere
-with `BBC_CONFIG_FILE=/path/to/config.yml`. The webapp is published on
-`http://localhost:8080`; override with `BBC_PORT`, `BBC_IMAGE` or `BBC_CONTAINER`
-as needed.
+The scripts mount `./config.yml` (host) at `/config.yml` in the container. If that
+file does not exist, `start` prompts interactively: run the **first-time setup
+wizard** (inside a throwaway container, writing the result to the host path) or
+point at an existing file with `BBC_CONFIG_FILE=/path/to/config.yml`. The webapp
+is published on `http://localhost:8080`; override with `BBC_PORT`, `BBC_IMAGE` or
+`BBC_CONTAINER` as needed.
 
 ## Usage
 

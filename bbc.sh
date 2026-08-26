@@ -47,11 +47,63 @@ build() {
 }
 
 ensure_config() {
-  if [[ ! -f "$CONFIG_FILE" ]]; then
+  while [[ ! -f "$CONFIG_FILE" ]]; do
     err "Config file not found: ${CONFIG_FILE}"
-    err "Create it first (username/app_password/projects — see README) or set"
-    err "BBC_CONFIG_FILE=/path/to/config.yml and re-run."
-    exit 1
+    echo
+    echo "  1) Run the first-time setup wizard"
+    echo "  2) Set BBC_CONFIG_FILE to another path"
+    echo "  q) Abort"
+    echo
+    read -r -p "Choose an option [1/2/q]: " choice || choice=""
+    case "$choice" in
+      1) run_wizard ;;
+      2)
+        read -r -p "Config file path: " new_path || new_path=""
+        if [[ -n "$new_path" ]]; then
+          CONFIG_FILE="$new_path"
+        fi
+        ;;
+      q|Q|"")
+        err "Aborted."
+        exit 1
+        ;;
+      *)
+        err "Unknown option: ${choice}"
+        ;;
+    esac
+  done
+}
+
+# Run the app's interactive first-run wizard inside a throwaway container,
+# writing the resulting config to the host path in CONFIG_FILE.
+run_wizard() {
+  if ! image_exists; then
+    log "Image not found — building it now."
+    build
+  fi
+
+  local cfg_dir cfg_base cfg_dir_abs
+  cfg_dir="$(dirname "$CONFIG_FILE")"
+  cfg_base="$(basename "$CONFIG_FILE")"
+  mkdir -p "$cfg_dir"
+  cfg_dir_abs="$(cd "$cfg_dir" && pwd)"
+
+  log "Starting the interactive setup wizard…"
+  log "Config will be written to: ${cfg_dir_abs}/${cfg_base}"
+  log "After the wizard completes, quit the TUI with 'q'."
+
+  # Success is measured by whether the config file is created below, not the
+  # container exit code (the user quits the TUI, possibly with ctrl+c).
+  docker run --rm -it \
+    --user "$(id -u):$(id -g)" \
+    -v "${cfg_dir_abs}:/cfg" \
+    -e "BBC_CONFIG=/cfg/${cfg_base}" \
+    "$IMAGE_NAME" || true
+
+  if [[ -f "$CONFIG_FILE" ]]; then
+    log "Configuration saved to ${CONFIG_FILE}."
+  else
+    err "Wizard finished but ${CONFIG_FILE} was not created."
   fi
 }
 
