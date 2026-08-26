@@ -64,55 +64,92 @@ function parseHash() {
 }
 
 /**
- * Navigate to a page.
+ * Resolve a page + params into a hash string (e.g. "#/bbc/ws/repo"), or null
+ * when the target can't be determined (e.g. no active project).
+ *
+ *   resolveHash('manage')
+ *   resolveHash('running')
+ *   resolveHash('list')
+ *   resolveHash('detail', pipelineUUID)
+ *   resolveHash('logs', pipelineUUID, stepNum)
+ *   resolveHash('trigger')
+ *
+ * Workspace and repoSlug are pulled from the activeProject store unless an
+ * explicit `project` ({ workspace, repo_slug }) override is provided.
+ */
+export function resolveHash(page, pipelineUUID, stepNum, project) {
+  if (page === 'manage') return '#/manage';
+  if (page === 'running') return '#/running';
+
+  const proj = project || get(activeProject);
+  if (!proj || !proj.workspace || !proj.repo_slug) {
+    console.error('No active project to build URL');
+    return null;
+  }
+  const ws = encodeURIComponent(proj.workspace);
+  const rs = encodeURIComponent(proj.repo_slug);
+
+  if (page === 'list') return `#/bbc/${ws}/${rs}`;
+  if (page === 'trigger') return `#/bbc/${ws}/${rs}/trigger`;
+  if (page === 'detail') {
+    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
+    return puuid ? `#/bbc/${ws}/${rs}/${puuid}` : `#/bbc/${ws}/${rs}`;
+  }
+  if (page === 'logs') {
+    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
+    const sn = stepNum !== undefined ? stepNum : 0;
+    return puuid ? `#/bbc/${ws}/${rs}/${puuid}/logs/${sn}` : `#/bbc/${ws}/${rs}`;
+  }
+  return null;
+}
+
+/**
+ * Navigate to a page in the current tab.
  *   navigateTo('manage')
  *   navigateTo('running')
  *   navigateTo('list')
  *   navigateTo('detail', pipelineUUID)
  *   navigateTo('logs', pipelineUUID, stepNum)
  *   navigateTo('trigger')
- *
- * Workspace and repoSlug are pulled from the activeProject store.
  */
 export function navigateTo(page, pipelineUUID, stepNum) {
-  if (page === 'manage') {
-    window.location.hash = '#/manage';
-    return;
-  }
+  const hash = resolveHash(page, pipelineUUID, stepNum);
+  if (hash) window.location.hash = hash;
+}
 
-  if (page === 'running') {
-    window.location.hash = '#/running';
-    return;
-  }
+/**
+ * Open the target in a new browser tab.
+ */
+export function openInNewTab(page, pipelineUUID, stepNum, project) {
+  const hash = resolveHash(page, pipelineUUID, stepNum, project);
+  if (!hash) return;
+  const base = window.location.href.split('#')[0];
+  window.open(base + hash, '_blank', 'noopener');
+}
 
-  const proj = get(activeProject);
-  if (!proj || !proj.workspace || !proj.repo_slug) {
-    console.error('No active project to build URL');
-    return;
-  }
-  const ws = encodeURIComponent(proj.workspace);
-  const rs = encodeURIComponent(proj.repo_slug);
+/**
+ * Whether a click should open the target in a new tab rather than navigating
+ * in place: Ctrl/Cmd/Shift + click, or a middle-click.
+ */
+export function isNewTabClick(event) {
+  if (!event) return false;
+  return event.ctrlKey || event.metaKey || event.shiftKey || event.button === 1;
+}
 
-  if (page === 'list') {
-    window.location.hash = `#/bbc/${ws}/${rs}`;
-  } else if (page === 'trigger') {
-    window.location.hash = `#/bbc/${ws}/${rs}/trigger`;
-  } else if (page === 'detail') {
-    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
-    if (puuid) {
-      window.location.hash = `#/bbc/${ws}/${rs}/${puuid}`;
-    } else {
-      window.location.hash = `#/bbc/${ws}/${rs}`;
-    }
-  } else if (page === 'logs') {
-    const puuid = pipelineUUID !== undefined ? pipelineUUID : (get(selectedPipeline)?.uuid || '');
-    const sn = stepNum !== undefined ? stepNum : 0;
-    if (puuid) {
-      window.location.hash = `#/bbc/${ws}/${rs}/${puuid}/logs/${sn}`;
-    } else {
-      window.location.hash = `#/bbc/${ws}/${rs}`;
-    }
+/**
+ * Click handler for navigation "links". Honors Ctrl/Cmd/Shift + click and
+ * middle-click by opening the target in a new tab instead of navigating in
+ * place. Use this for simple handlers where no pre-navigation setup (e.g.
+ * switching the active project or prefilling stores) is required.
+ */
+export function navigateFromClick(event, page, pipelineUUID, stepNum, project) {
+  if (isNewTabClick(event)) {
+    event.preventDefault();
+    openInNewTab(page, pipelineUUID, stepNum, project);
+    return true;
   }
+  navigateTo(page, pipelineUUID, stepNum);
+  return false;
 }
 
 // ── Reactive stores derived from URL hash ────────────────────────────────────

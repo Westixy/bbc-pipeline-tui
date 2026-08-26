@@ -14,8 +14,8 @@
     detailState,
     showError,
   } from '../stores/appState.js';
-  import { page, navigateTo } from '../stores/router.js';
-  import { listRunningPipelines } from '../stores/api.js';
+  import { page, navigateTo, isNewTabClick, openInNewTab } from '../stores/router.js';
+  import { listRunningPipelines, getLogVariables } from '../stores/api.js';
   import { formatDate, statusLabel } from './utils.js';
 
   let autoRefresh = $state(false);
@@ -103,7 +103,17 @@
     }
   }
 
-  function openDetail(item) {
+  function openDetail(e, item) {
+    // Ctrl/Cmd/Shift + click (or middle-click) opens the detail in a new tab
+    // without switching the active project in the current tab.
+    if (isNewTabClick(e)) {
+      e.preventDefault();
+      openInNewTab('detail', item.pipeline.uuid, undefined, {
+        workspace: item.workspace,
+        repo_slug: item.repo_slug,
+      });
+      return;
+    }
     // Switch the active project FIRST so navigateTo('detail') builds the
     // correct URL from activeProject.
     activeProjectId.set(item.project_id);
@@ -115,6 +125,75 @@
     selectedVariables.set([]);
     selectedLogVariables.set([]);
     detailState.set('loading');
+  }
+
+  function truncateVal(val) {
+    if (!val) return '—';
+    return val.length > 60 ? val.slice(0, 60) + '…' : val;
+  }
+
+  // ── Hover popover for log variables ──────────────────────────────────
+  let hoveredPipeline = $state(null);
+  let hoverVars = $state([]);
+  let hoverVarsLoading = $state(false);
+  let hoverVarsError = $state('');
+  let hoverPos = $state({ x: 0, y: 0 });
+  let hoverTimer = null;
+  let hoverActive = $state(false);
+
+  // Cache log variables per pipeline UUID (never expires within a session).
+  const hoverVarsCache = new Map();
+
+  async function fetchHoverVars(item) {
+    if (!item?.pipeline?.uuid) return;
+    const uuid = item.pipeline.uuid;
+    const cached = hoverVarsCache.get(uuid);
+    if (cached) {
+      hoverVars = cached;
+      hoverVarsLoading = false;
+      hoverVarsError = '';
+      return;
+    }
+    hoverVarsLoading = true;
+    hoverVarsError = '';
+    hoverVars = [];
+    try {
+      // Each running entry carries its own project_id, so fetch using the
+      // project that actually owns this pipeline (not the active project).
+      const data = await getLogVariables(item.project_id, uuid);
+      const vars = data.variables || [];
+      hoverVars = vars;
+      hoverVarsCache.set(uuid, vars);
+    } catch (e) {
+      hoverVarsError = e.message;
+    } finally {
+      hoverVarsLoading = false;
+    }
+  }
+
+  function onRowMouseEnter(e, item) {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverPos = { x: e.clientX, y: e.clientY };
+    hoverTimer = setTimeout(() => {
+      hoveredPipeline = item.pipeline;
+      hoverActive = true;
+      fetchHoverVars(item);
+    }, 400);
+  }
+
+  function onRowMouseMove(e) {
+    if (hoverActive) {
+      hoverPos = { x: e.clientX, y: e.clientY };
+    }
+  }
+
+  function onRowMouseLeave() {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = null;
+    hoverActive = false;
+    hoveredPipeline = null;
+    hoverVars = [];
+    hoverVarsError = '';
   }
 
   // While on the running page: tick every second (for live elapsed times).
@@ -289,8 +368,11 @@
             class="data-grid-row"
             role="row"
             tabindex="0"
-            onclick={() => openDetail(item)}
-            onkeydown={(e) => { if (e.key === 'Enter') openDetail(item); }}
+            onclick={(e) => openDetail(e, item)}
+            onkeydown={(e) => { if (e.key === 'Enter') openDetail(null, item); }}
+            onmouseenter={(e) => onRowMouseEnter(e, item)}
+            onmousemove={onRowMouseMove}
+            onmouseleave={onRowMouseLeave}
           >
             <div class="data-grid-cell col-project">
               <span class="project-path truncate" title="{item.workspace}/{item.repo_slug}">
@@ -327,6 +409,36 @@
           </div>
         {/each}
       </div>
+    </div>
+  {/if}
+
+  <!-- ── Hover popover for log variables ─────────────────── -->
+  {#if hoverActive && hoveredPipeline}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="vars-popover"
+      style="left: {hoverPos.x + 12}px; top: {hoverPos.y - 8}px"
+      onmouseenter={() => { if (hoverTimer) clearTimeout(hoverTimer); }}
+      onmouseleave={onRowMouseLeave}
+    >
+      <div class="vars-popover-header">
+        <span class="vars-popover-title">#{hoveredPipeline.build_number || '—'} variables</span>
+        {#if hoverVarsLoading}
+          <span class="spinner vars-spinner"></span>
+        {:else if hoverVarsError}
+          <span class="vars-popover-error">{hoverVarsError}</span>
+        {/if}
+      </div>
+      {#if !hoverVarsLoading && !hoverVarsError && hoverVars.length > 0}
+        <div class="vars-popover-grid">
+          {#each hoverVars as v}
+            <div class="vp-key">{v.key}</div>
+            <div class="vp-val" class:vp-val-secret={v.secured} title={v.secured ? '' : v.value}>{v.secured ? '••••••••' : truncateVal(v.value)}</div>
+          {/each}
+        </div>
+      {:else if !hoverVarsLoading && !hoverVarsError && hoverVars.length === 0}
+        <div class="vars-popover-empty">No variables for this pipeline</div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -578,4 +690,85 @@
   .sk-dur     { width: 36px;  height: 12px; margin-left: auto; }
   .sk-name    { width: 60px;  height: 12px; }
   .sk-date    { width: 80px;  height: 12px; }
+
+  /* ── Hover popover for log variables ───────────────────────── */
+  .vars-popover {
+    position: fixed;
+    z-index: 1000;
+    min-width: 220px;
+    max-width: 340px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-dropdown);
+    padding: var(--space-3);
+    pointer-events: auto;
+    animation: popIn 0.12s ease-out;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .vars-popover-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .vars-popover-title {
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+  .vars-spinner {
+    width: 12px;
+    height: 12px;
+    border-width: 2px;
+  }
+  .vars-popover-error {
+    font-size: 10.5px;
+    color: var(--danger-text);
+  }
+
+  .vars-popover-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px var(--space-3);
+    align-items: baseline;
+  }
+  .vp-key {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    padding: 1px 0;
+    min-width: 0;
+  }
+  .vp-val {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    word-break: break-all;
+    padding: 1px 0;
+    min-width: 0;
+  }
+  .vp-val-secret {
+    color: var(--text-tertiary);
+    font-style: italic;
+    letter-spacing: 0.15em;
+  }
+
+  .vars-popover-empty {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: var(--space-2) 0;
+  }
 </style>

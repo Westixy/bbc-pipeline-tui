@@ -2,7 +2,7 @@
   import { get } from 'svelte/store';
   import { onDestroy } from 'svelte';
   import { activeProject, pipelines, pipelinesNext, listState, listError, listSort, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, refreshTrigger, logStepName, logStepUUID } from '../stores/appState.js';
-  import { page, navigateTo } from '../stores/router.js';
+  import { page, navigateTo, isNewTabClick, openInNewTab } from '../stores/router.js';
   import { listPipelines, getLogVariables, getPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, statusLabel } from './utils.js';
 
@@ -102,7 +102,14 @@
     localFilter = '';
   }
 
-  function viewDetail(pipeline) {
+  function viewDetail(e, pipeline) {
+    // Ctrl/Cmd/Shift + click (or middle-click) opens in a new tab without
+    // mutating the current tab's state.
+    if (isNewTabClick(e)) {
+      e.preventDefault();
+      openInNewTab('detail', pipeline.uuid);
+      return;
+    }
     // Navigate FIRST so $page changes before we set stores.
     // Otherwise PipelineDetail's cleanup $effect can see $page==='list'
     // and clear the pipeline we just set.
@@ -147,8 +154,15 @@
   // ── Direct log access for running pipelines ─────────────────────────
   let logLoadingFor = $state(null); // pipeline uuid currently loading
 
-  async function goToLog(pipeline) {
+  async function goToLog(e, pipeline) {
     if (!$activeProject || !pipeline?.uuid) return;
+    // New-tab click: the running step's index isn't known synchronously, so
+    // open the pipeline detail in a new tab as a best-effort fallback.
+    if (isNewTabClick(e)) {
+      e.preventDefault();
+      openInNewTab('detail', pipeline.uuid);
+      return;
+    }
     const pUuid = pipeline.uuid;
     logLoadingFor = pUuid;
     try {
@@ -363,7 +377,7 @@
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       const pipe = displayedPipelines[index];
-      if (pipe) viewDetail(pipe);
+      if (pipe) viewDetail(null, pipe);
     }
   }
 </script>
@@ -496,7 +510,7 @@
             role="row"
             aria-label="Pipeline #{pipe.build_number} - {statusLabel(pipe.state)}"
             aria-selected={selectedIndex === index}
-            onclick={() => viewDetail(pipe)}
+            onclick={(e) => viewDetail(e, pipe)}
             onkeydown={(e) => handleRowKeydown(e, index)}
             onmouseenter={(e) => onRowMouseEnter(e, pipe)}
             onmousemove={onRowMouseMove}
@@ -540,7 +554,7 @@
               {#if pipe.state?.name === 'IN_PROGRESS' || pipe.state?.name === 'PENDING'}
                 <button
                   class="btn btn-secondary btn-xs"
-                  onclick={(e) => { e.stopPropagation(); goToLog(pipe); }}
+                  onclick={(e) => { e.stopPropagation(); goToLog(e, pipe); }}
                   disabled={logLoadingFor === pipe.uuid}
                   title="Open running step log"
                 >

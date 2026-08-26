@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, detailState, showError, showSuccess, logStepName, logStepUUID, triggerPreTarget, triggerPreSelector, triggerPreVars, refreshTrigger } from '../stores/appState.js';
-  import { page, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo } from '../stores/router.js';
+  import { page, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl, navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
   import { getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import { formatDate, formatDuration, formatDurationCompact, statusLabel, statusClassForState, resolveStepStatus } from './utils.js';
   import ConfirmModal from './ConfirmModal.svelte';
@@ -360,7 +360,7 @@
   <div class="sticky-header">
     <div class="header-row">
       <div class="header-left">
-        <button class="btn btn-ghost" onclick={() => navigateTo('list')}>
+        <button class="btn btn-ghost" onclick={(e) => navigateFromClick(e, 'list')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
           </svg>
@@ -519,8 +519,13 @@
                 class:node-running={stepStatus === 'IN_PROGRESS'}
                 class:node-stopped={stepStatus === 'STOPPED'}
                 class:node-pending={stepStatus === 'PENDING'}
-                onclick={() => {
+                onclick={(e) => {
                   if (step.state?.name !== 'NOT_STARTED') {
+                    if (isNewTabClick(e)) {
+                      e.preventDefault();
+                      openInNewTab('logs', $selectedPipeline.uuid, i);
+                      return;
+                    }
                     logStepName.set(step.name || `Step ${i + 1}`);
                     logStepUUID.set(step.uuid);
                     navigateTo('logs', $selectedPipeline.uuid, i);
@@ -619,7 +624,12 @@
                     {#if step.state?.name !== 'NOT_STARTED'}
                       <button
                         class="btn btn-secondary btn-xs"
-                        onclick={() => {
+                        onclick={(e) => {
+                          if (isNewTabClick(e)) {
+                            e.preventDefault();
+                            openInNewTab('logs', $selectedPipeline.uuid, stepIdx);
+                            return;
+                          }
                           logStepName.set(step.name || `Step ${stepIdx + 1}`);
                           logStepUUID.set(step.uuid);
                           navigateTo('logs', $selectedPipeline.uuid, stepIdx);

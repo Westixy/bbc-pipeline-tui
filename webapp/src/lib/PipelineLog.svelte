@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, tick } from 'svelte';
   import { activeProject, selectedPipeline, selectedSteps, selectedVariables, selectedLogVariables, logContent, logStepName, logStepUUID, showError, showSuccess, refreshTrigger, triggerPreTarget, triggerPreSelector, triggerPreVars } from '../stores/appState.js';
-  import { navigateTo, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
+  import { navigateTo, navigateFromClick, stepNumFromUrl, pipelineUUIDFromUrl, workspaceFromUrl, repoSlugFromUrl } from '../stores/router.js';
   import { getStepLog, getPipeline, listVariables, getLogVariables, stopPipeline } from '../stores/api.js';
   import ConfirmModal from './ConfirmModal.svelte';
   import { resolveStepStatus, formatDate, formatDuration } from './utils.js';
@@ -481,7 +481,7 @@
   <div class="log-sticky-header">
     <div class="log-header-row">
       <div class="log-header-left">
-        <button class="btn btn-ghost btn-sm" onclick={() => navigateTo('detail', $selectedPipeline?.uuid)}>
+        <button class="btn btn-ghost btn-sm" onclick={(e) => navigateFromClick(e, 'detail', $selectedPipeline?.uuid)}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
           </svg>

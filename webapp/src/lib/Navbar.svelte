@@ -1,12 +1,17 @@
 <script>
   import { projects, activeProject, activeProjectId, refreshTrigger } from '../stores/appState.js';
-  import { page, navigateTo } from '../stores/router.js';
+  import { page, navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
 
   let projectCount = $derived($projects.length);
   let switching = $state(false);
 
-  function selectProject(index) {
+  function selectProject(index, e) {
     switching = true;
+    if (isNewTabClick(e)) {
+      e.preventDefault();
+      openInNewTab('list', undefined, undefined, $projects[index]);
+      return;
+    }
     if (index !== $activeProjectId) {
       activeProjectId.set(index);
     }
@@ -21,7 +26,7 @@
     <button
       class="activity-item"
       class:active={$page === 'list' || $page === 'detail' || $page === 'logs'}
-      onclick={() => navigateTo('list')}
+      onclick={(e) => navigateFromClick(e, 'list')}
       title="Pipelines"
       disabled={!$activeProject}
     >
@@ -39,7 +44,7 @@
     <button
       class="activity-item"
       class:active={$page === 'running'}
-      onclick={() => navigateTo('running')}
+      onclick={(e) => navigateFromClick(e, 'running')}
       title="Running Pipelines"
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -51,7 +56,7 @@
     <button
       class="activity-item"
       class:active={$page === 'trigger'}
-      onclick={() => navigateTo('trigger')}
+      onclick={(e) => navigateFromClick(e, 'trigger')}
       title="Trigger Pipeline"
       disabled={!$activeProject}
     >
@@ -64,7 +69,7 @@
     <button
       class="activity-item"
       class:active={$page === 'manage'}
-      onclick={() => navigateTo('manage')}
+      onclick={(e) => navigateFromClick(e, 'manage')}
       title="Manage Projects"
     >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -111,7 +116,7 @@
             <button
               class="project-item"
               class:active={i === $activeProjectId}
-              onclick={() => selectProject(i)}
+              onclick={(e) => selectProject(i, e)}
               title="{proj.workspace}/{proj.repo_slug}"
             >
               <div class="project-item-content">
@@ -132,7 +137,7 @@
     {/if}
 
     <div class="sidebar-footer">
-      <button class="sidebar-footer-btn" onclick={() => navigateTo('manage')}>
+      <button class="sidebar-footer-btn" onclick={(e) => navigateFromClick(e, 'manage')}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>

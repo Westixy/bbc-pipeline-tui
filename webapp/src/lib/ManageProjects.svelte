@@ -1,6 +1,6 @@
 <script>
   import { projects, activeProject, activeProjectId, showError, showSuccess, workspaceRepos, workspaceReposState, workspaceReposError, refreshTrigger } from '../stores/appState.js';
-  import { navigateTo } from '../stores/router.js';
+  import { navigateTo, navigateFromClick, isNewTabClick, openInNewTab } from '../stores/router.js';
   import { listProjects, addProject, removeProject, listRepositories } from '../stores/api.js';
   import ConfirmModal from './ConfirmModal.svelte';
 
@@ -185,7 +185,7 @@
   <!-- Header Bar ──────────────────────────────────────── -->
   <div class="manage-header">
     <div class="manage-header-left">
-      <button class="btn btn-ghost btn-sm" onclick={() => navigateTo($projects.length > 0 ? 'list' : 'manage')}>
+      <button class="btn btn-ghost btn-sm" onclick={(e) => navigateFromClick(e, $projects.length > 0 ? 'list' : 'manage')}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
         </svg>
@@ -368,7 +368,15 @@
             <div class="project-card-actions">
               <button
                 class="btn btn-secondary btn-sm"
-                onclick={() => { activeProjectId.set(i); navigateTo('list'); }}
+                onclick={(e) => {
+                  if (isNewTabClick(e)) {
+                    e.preventDefault();
+                    openInNewTab('list', undefined, undefined, proj);
+                    return;
+                  }
+                  activeProjectId.set(i);
+                  navigateTo('list');
+                }}
                 title="Open in pipeline list"
               >
                 Open
