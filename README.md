@@ -49,6 +49,9 @@ the `BBC_CONFIG` environment variable).
 
 ## Docker
 
+> 📖 **Full walkthrough:** see [`USERGUIDE.md`](USERGUIDE.md) for a step-by-step
+> guide to running the webapp via `bbc.sh`.
+
 A `Dockerfile` is included that uses **Nix as the build stage** (producing a
 statically-linked Go binary with the embedded webapp) and a **`scratch` runtime
 image** containing only the binary. The config is expected at `/config.yml`
