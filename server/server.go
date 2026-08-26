@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -65,6 +66,9 @@ func (s *Server) registerRoutes() {
 
 	// Workspace repositories
 	s.mux.HandleFunc("GET /api/repositories/{workspace}", s.handleListRepositories)
+
+	// Running pipelines across all configured projects
+	s.mux.HandleFunc("GET /api/running-pipelines", s.handleRunningPipelines)
 
 	// Serve embedded Svelte frontend
 	distFS, err := fs.Sub(webappDist, "webapp-dist")
@@ -443,6 +447,72 @@ func (s *Server) handleListRepositories(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, 200, map[string]interface{}{
 		"repositories": repos,
+	})
+}
+
+// runningPipelineEntry couples a running pipeline with the configured project
+// it belongs to, so the frontend can navigate to the right project.
+type runningPipelineEntry struct {
+	ProjectID int                `json:"project_id"`
+	Name      string             `json:"name"`
+	Workspace string             `json:"workspace"`
+	RepoSlug  string             `json:"repo_slug"`
+	Pipeline  bitbucket.Pipeline `json:"pipeline"`
+}
+
+// isRunningState reports whether a pipeline state name represents a pipeline
+// that is still actively running. Mirrors the states the webapp's
+// PipelineDetail auto-refresh treats as in-progress.
+func isRunningState(name string) bool {
+	switch strings.ToUpper(name) {
+	case "IN_PROGRESS", "PENDING", "IN_PROGRESS_STOPPING":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleRunningPipelines lists the currently running pipelines across every
+// configured project. A failure for a single repository is reported alongside
+// the results rather than failing the whole request.
+func (s *Server) handleRunningPipelines(w http.ResponseWriter, r *http.Request) {
+	var running []runningPipelineEntry
+	var errs []string
+
+	for i, p := range s.cfg.Projects {
+		result, err := s.client.ListPipelines(p.Workspace, p.RepoSlug, &bitbucket.ListPipelinesParams{
+			Pagelen: 100,
+			Sort:    "-created_on",
+		})
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s/%s: %v", p.Workspace, p.RepoSlug, err))
+			continue
+		}
+		for _, pipeline := range result.Values {
+			if !isRunningState(pipeline.State.Name) {
+				continue
+			}
+			running = append(running, runningPipelineEntry{
+				ProjectID: i,
+				Name:      p.Workspace + "/" + p.RepoSlug,
+				Workspace: p.Workspace,
+				RepoSlug:  p.RepoSlug,
+				Pipeline:  pipeline,
+			})
+		}
+	}
+
+	// Most recently created first, regardless of which repo it came from.
+	sort.SliceStable(running, func(a, b int) bool {
+		return running[a].Pipeline.CreatedOn > running[b].Pipeline.CreatedOn
+	})
+
+	if errs == nil {
+		errs = []string{}
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"running": running,
+		"errors":  errs,
 	})
 }
 

@@ -9,6 +9,7 @@
   import PipelineLog from './lib/PipelineLog.svelte';
   import PipelineTrigger from './lib/PipelineTrigger.svelte';
   import ManageProjects from './lib/ManageProjects.svelte';
+  import RunningPipelines from './lib/RunningPipelines.svelte';
   import Notification from './lib/Notification.svelte';
 
   let currentYear = new Date().getFullYear();
@@ -68,6 +69,8 @@
         <span class="titlebar-breadcrumb">Trigger Pipeline</span>
       {:else if $page === 'manage'}
         <span class="titlebar-breadcrumb">Manage Projects</span>
+      {:else if $page === 'running'}
+        <span class="titlebar-breadcrumb">Running Pipelines</span>
       {/if}
     </div>
     <div class="titlebar-right">
@@ -89,6 +92,8 @@
         <PipelineTrigger />
       {:else if $page === 'manage'}
         <ManageProjects />
+      {:else if $page === 'running'}
+        <RunningPipelines />
       {:else}
         <!-- Landing / loading state when no route matches -->
         <div class="landing-page">

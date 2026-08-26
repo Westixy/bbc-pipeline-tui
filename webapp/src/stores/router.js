@@ -6,6 +6,7 @@ import { activeProject, selectedPipeline } from './appState.js';
  *
  * Routes:
  *   #/manage                                           – Manage projects
+ *   #/running                                          – Running pipelines across all projects
  *   #/bbc/<workspace>/<repoSlug>                       – Pipeline list
  *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>         – Pipeline detail
  *   #/bbc/<workspace>/<repoSlug>/<pipelineUUID>/logs/<stepNum> – Step log viewer
@@ -20,6 +21,11 @@ function parseHash() {
   // #/manage
   if (hash === '#/manage') {
     return { page: 'manage', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
+  }
+
+  // #/running
+  if (hash === '#/running') {
+    return { page: 'running', workspace: null, repoSlug: null, pipelineUUID: null, stepNum: null };
   }
 
   // #/bbc/workspace/repoSlug/...
@@ -60,6 +66,7 @@ function parseHash() {
 /**
  * Navigate to a page.
  *   navigateTo('manage')
+ *   navigateTo('running')
  *   navigateTo('list')
  *   navigateTo('detail', pipelineUUID)
  *   navigateTo('logs', pipelineUUID, stepNum)
@@ -70,6 +77,11 @@ function parseHash() {
 export function navigateTo(page, pipelineUUID, stepNum) {
   if (page === 'manage') {
     window.location.hash = '#/manage';
+    return;
+  }
+
+  if (page === 'running') {
+    window.location.hash = '#/running';
     return;
   }
 

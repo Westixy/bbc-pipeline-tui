@@ -92,3 +92,8 @@ export function getLogVariables(projectId, pipelineUuid) {
 export function listRepositories(workspace) {
   return request(`/repositories/${workspace}`);
 }
+
+// --- Running pipelines (across all configured projects) ---
+export function listRunningPipelines() {
+  return request('/running-pipelines');
+}

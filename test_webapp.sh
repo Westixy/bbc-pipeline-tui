@@ -33,7 +33,13 @@ print(f'#{d[\"pipeline\"][\"build_number\"]} steps={len(d[\"steps\"])}')"
 echo "=== 4. Variables ==="
 curl -sf "${BASE}/api/projects/0/variables" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['variables']),'variables')"
 
-echo "=== 5. Frontend ==="
+echo "=== 5. Running pipelines ==="
+curl -sf "${BASE}/api/running-pipelines" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(f\"{len(d['running'])} running pipeline(s), {len(d['errors'])} repo error(s)\")"
+
+echo "=== 6. Frontend ==="
 curl -sfI "${BASE}/" | head -1
 
 echo "=== ALL TESTS PASSED ==="

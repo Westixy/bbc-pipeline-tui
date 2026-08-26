@@ -40,6 +40,11 @@ export const workspaceRepos = writable([]);
 export const workspaceReposState = writable('idle'); // 'idle' | 'loading' | 'ready' | 'error'
 export const workspaceReposError = writable('');
 
+// Running pipelines (across all projects)
+export const runningPipelines = writable([]);
+export const runningPipelinesState = writable('idle'); // 'idle' | 'loading' | 'ready' | 'error'
+export const runningPipelinesErrors = writable([]);
+
 // Active project (derived)
 export const activeProject = derived([projects, activeProjectId], ([$projects, $activeProjectId]) => {
   return $projects[$activeProjectId] || null;

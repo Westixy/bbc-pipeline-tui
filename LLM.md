@@ -1,10 +1,5 @@
 # infra-pipeline-ui — Repository Context
 
-> Note: this repo already contains a lower-case `llm.md`. That file is **stale/out of date**
-> (it describes a Gin backend, `-serve`/`-port` flags, per-project credentials, and a
-> `~/.config/bbc-pipeline-tui/config.yml` path — none of which match the current code).
-> Trust this `LLM.md` and the source code over `llm.md`.
-
 ## 1. Project overview
 
 `infra-pipeline-ui` is an internal tool for browsing, inspecting, and triggering
