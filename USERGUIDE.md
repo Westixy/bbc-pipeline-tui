@@ -188,8 +188,8 @@ for, in order:
    workspace to finish).
 
 ```
-Enter your Bitbucket username: your-username
-Enter your Bitbucket app password: **************
+Enter your Bitbucket username: your-username (email address)
+Enter your Bitbucket app password: ************** (API Token)
 
 Enter workspace slug (or press Enter to finish): my-workspace
 Enter repository slug: my-repo
@@ -271,8 +271,8 @@ BBC_IMAGE=bbc:dev BBC_CONTAINER=bbc-dev ./bbc.sh start
 default it looks for `config.yml` next to the script.
 
 ```yaml
-username: "your-bitbucket-username"
-app_password: "your-app-password"
+username: "your-bitbucket-email-address"
+app_password: "your-aapi token"
 projects:
   - workspace: "my-workspace"
     repo_slug: "my-repo"
@@ -307,7 +307,7 @@ You can skip the wizard entirely and create the file by hand:
 ```bash
 cat > config.yml <<'EOF'
 username: "your-bitbucket-username"
-app_password: "your-app-password"
+app_password: "your-api-token"
 projects:
   - workspace: "my-workspace"
     repo_slug: "my-repo"

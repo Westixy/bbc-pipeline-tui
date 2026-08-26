@@ -219,3 +219,5 @@ Open the URL printed on start (default `http://localhost:8080`). For a complete 
 
 - [USERGUIDE.md](USERGUIDE.md) — how to run the app in webapp mode (Docker + `bbc.sh`, configuration, troubleshooting).
 - [WEBAPP_GUIDE.md](WEBAPP_GUIDE.md) — complete description of the webapp frontend's features.
+
+> Built out of spite — a frustration-fueled side project, developed with DeepSeek V4.
